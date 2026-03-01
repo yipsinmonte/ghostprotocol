@@ -3044,68 +3044,34 @@ async function _resolveAndShowSolDomain(addr, domainEl, updateName) {
     return false;
   };
 
-  // SNS: use Bonfida proxy with required ?rpc= param
-  // /domains/:owner  → array of domain registry pubkeys owned by wallet
-  // /reverse-lookup/:domainPubkey → domain name string for each pubkey
-  // To get PRIMARY domain: on-chain ptrKey account stores the primary domain pubkey
-  // If ptrKey account doesn't exist → user has no primary set, show first owned domain
-  const PROXY = 'https://sns-sdk-proxy.bonfida.workers.dev';
-  const RPC_PARAM = '?rpc=' + encodeURIComponent(RPC_URL);
-
-  const rpc = async (id, pubkey) => {
-    const r = await fetch(RPC_URL, { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ jsonrpc:'2.0', id, method:'getAccountInfo', params:[pubkey, {encoding:'base64'}] }) });
-    return r.json();
-  };
+  // SNS: try SNS API cached endpoint first (perfect for UI, lags by a few minutes)
+  // GET https://sns-api.bonfida.workers.dev/v2/user/domains/:owner  <- primary + all domains
+  // Fallback: on-chain via Helius (two getAccountInfo calls)
 
   try {
-    // Step 1: try on-chain primary domain pointer
-    const { PublicKey } = solanaWeb3;
-    const programKey = new PublicKey('namesLPAXkSnS6VoK3M3AoUBYSbkTr3YUidbEMrCXLF');
-    const [centralState] = await PublicKey.findProgramAddress([programKey.toBytes()], programKey);
-    const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('SPL Name Service' + addr));
-    const [ptrKey] = await PublicKey.findProgramAddress(
-      [new Uint8Array(hashBuf), new Uint8Array(32), centralState.toBytes()], programKey);
-    console.log('[Ghost] SNS ptrKey:', ptrKey.toString().slice(0,8));
-
-    const ptrData = await rpc('snsp', ptrKey.toString());
-    const ptrB64 = ptrData?.result?.value?.data?.[0];
-
-    if (ptrB64) {
-      // Primary domain pointer exists — extract domain registry pubkey at offset 96
-      const ptrRaw = Uint8Array.from(atob(ptrB64), c => c.charCodeAt(0));
-      if (ptrRaw.length >= 128) {
-        const domainKey = new PublicKey(ptrRaw.slice(96, 128));
-        console.log('[Ghost] SNS domainKey:', domainKey.toString().slice(0,8));
-        // Reverse lookup via proxy: /reverse-lookup/:domainPubkey
-        const rlRes = await fetch(PROXY + '/reverse-lookup/' + domainKey.toString() + RPC_PARAM);
-        const rlData = await rlRes.json();
-        console.log('[Ghost] SNS primary reverse-lookup:', JSON.stringify(rlData));
-        if (tryShowDomain(rlData?.result)) return;
-      }
+    // SNS API: get user profile including primary domain
+    const apiRes = await fetch('https://sns-api.bonfida.workers.dev/v2/user/domains/' + addr);
+    if (apiRes.ok) {
+      const apiData = await apiRes.json();
+      console.log('[Ghost] SNS API response:', JSON.stringify(apiData)?.slice(0,200));
+      // Response has primaryDomain or primary field
+      const primary = apiData?.primaryDomain || apiData?.primary || apiData?.result?.primaryDomain;
+      if (tryShowDomain(primary)) return;
     }
+  } catch(e) { console.warn('[Ghost] SNS API failed:', e.message); }
 
-    // Step 2: no primary set — get all owned domains and show first
-    console.log('[Ghost] SNS: no primary ptr, fetching all domains');
-    const domsRes = await fetch(PROXY + '/domains/' + addr + RPC_PARAM);
-    const domsData = await domsRes.json();
-    console.log('[Ghost] SNS /domains result:', JSON.stringify(domsData)?.slice(0,120));
-    const domKeys = domsData?.result;
-    if (!Array.isArray(domKeys) || domKeys.length === 0) throw new Error('no domains owned');
+  try {
+    // Fallback: SNS all-primary cached endpoint — lookup by wallet key
+    const allRes = await fetch('https://sns-api.bonfida.workers.dev/v2/domains/all-primary');
+    if (allRes.ok) {
+      const allData = await allRes.json();
+      const entry = allData?.[addr];
+      console.log('[Ghost] SNS all-primary entry:', JSON.stringify(entry));
+      if (entry?.domain && tryShowDomain(entry.domain)) return;
+    }
+  } catch(e) { console.warn('[Ghost] SNS all-primary failed:', e.message); }
 
-    // domKeys is array of {pubkey, ...} or strings — reverse lookup the first one
-    const firstKey = typeof domKeys[0] === 'string' ? domKeys[0] : domKeys[0]?.pubkey || domKeys[0]?.key;
-    if (!firstKey) throw new Error('could not extract domain key from: ' + JSON.stringify(domKeys[0]));
-    const rlRes2 = await fetch(PROXY + '/reverse-lookup/' + firstKey + RPC_PARAM);
-    const rlData2 = await rlRes2.json();
-    console.log('[Ghost] SNS first domain reverse-lookup:', JSON.stringify(rlData2));
-    if (tryShowDomain(rlData2?.result)) return;
-
-  } catch(e) {
-    console.warn('[Ghost] SNS failed:', e.message);
-  }
-
-  console.log('[Ghost] SNS: no domain resolved for', addr.slice(0,8))
+  console.log('[Ghost] SNS: no primary domain for', addr.slice(0,8))
 }
 
 // ─── Copy wallet address ──────────────────────────────────────
