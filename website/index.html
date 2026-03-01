@@ -3059,7 +3059,9 @@ async function _resolveAndShowSolDomain(addr, domainEl, updateName) {
       const programKey = new PublicKey(NAME_PROGRAM);
       // SNS PDA seeds: [hash(32 bytes), nameClass(32 bytes), nameParent(32 zero bytes)]
       const [reversePda] = await PublicKey.findProgramAddress([hashBytes, classKey.toBytes(), new Uint8Array(32)], programKey);
-      const res = await fetch(RPC_URL, {
+      // Use public RPC for SNS — Helius free tier 404s on name registry accounts
+      const SNS_RPC = 'https://api.mainnet-beta.solana.com';
+      const res = await fetch(SNS_RPC, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 'sns', method: 'getAccountInfo',
           params: [reversePda.toString(), { encoding: 'base64' }] })
@@ -5690,7 +5692,9 @@ async function loadWalletTokens() {
       freshTokens.find(f => f.mint === t.mint) || t._sessionOnly
     );
     if (ghostState.walletTokens.length === freshTokens.length) {
-      setTimeout(fetchPumpFunData, 200);
+      // Only refetch if there are tokens without prices/logos yet
+      const needsFetch = ghostState.walletTokens.some(t => !pumpFunFetched.has(t.mint) || !priceFetched.has(t.mint));
+      if (needsFetch) setTimeout(fetchPumpFunData, 200);
     }
 
     // Fetch vault token balances from chain — source of truth regardless of session state
@@ -5827,7 +5831,7 @@ async function loadWalletTokens() {
 async function fetchTokenMetadata(tokens, mints) {
   // Step 1: Try Jupiter token list for established tokens
   try {
-    const res = await fetch('https://token.jup.ag/all');
+    const res = await fetch('https://tokens.jup.ag/tokens?tags=verified');
     if (res.ok) {
       const list = await res.json();
       const byMint = {};
