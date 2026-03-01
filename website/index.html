@@ -3052,25 +3052,10 @@ async function _resolveAndShowSolDomain(addr, domainEl, updateName) {
   // domain registry data[100..] = name string
   const NAME_PROGRAM = 'namesLPAXkSnS6VoK3M3AoUBYSbkTr3YUidbEMrCXLF';
 
-  // SNS needs an RPC that allows getAccountInfo on name registry accounts
-  // Helius free tier blocks these — try public endpoints in order
-  const SNS_RPCS = [
-    'https://api.mainnet-beta.solana.com',
-    'https://solana-api.projectserum.com',
-    'https://rpc.ankr.com/solana',
-  ];
   const rpc = async (id, pubkey) => {
-    for (const endpoint of SNS_RPCS) {
-      try {
-        const r = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ jsonrpc:'2.0', id, method:'getAccountInfo', params:[pubkey, {encoding:'base64'}] }) });
-        const d = await r.json();
-        if (d?.error || !r.ok) { console.warn('[Ghost] SNS', endpoint.slice(8,30), r.status, d?.error?.message); continue; }
-        console.log('[Ghost] SNS RPC ok:', endpoint.slice(8,30));
-        return d;
-      } catch(e) { console.warn('[Ghost] SNS RPC fail:', e.message); }
-    }
-    return null;
+    const r = await fetch(RPC_URL, { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ jsonrpc:'2.0', id, method:'getAccountInfo', params:[pubkey, {encoding:'base64'}] }) });
+    return r.json();
   };
 
   const readName = (b64) => {
