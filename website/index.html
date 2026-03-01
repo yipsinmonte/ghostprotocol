@@ -731,7 +731,7 @@
               <button id="dbCopyAddrBtn" onclick="dbCopyWalletAddr()" title="Copy address" style="background:none;border:none;color:#6868a0;font-size:11px;cursor:pointer;padding:0;line-height:1;flex-shrink:0">⧉</button>
             </div>
           </div>
-          <div id="dbSolBadge" style="display:none;background:rgba(153,69,255,0.15);border:1px solid rgba(153,69,255,0.3);color:#cc99ff;font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.15em;padding:3px 8px;flex-shrink:0">.SOL</div>
+
         </div>
 
         <div class="db-alert" id="dbAwakeningAlert">
@@ -3038,33 +3038,16 @@ async function _resolveAndShowSolDomain(addr, domainEl, updateName) {
   const tryShowDomain = (domain) => {
     if (domain && typeof domain === 'string' && domain.length > 0 && !domain.includes(' ') && !domain.includes('{')) {
       if (domainEl && updateName) domainEl.textContent = domain + '.sol';
-      const badge = document.getElementById('dbSolBadge');
-      if (badge) badge.style.display = 'block';
+
       return true;
     }
     return false;
   };
 
-  // SNS resolution: try Bonfida proxy /domains/ endpoint (returns all owned domains),
-  // fall back to /reverse-lookup/ for primary domain
+  // SNS resolution: primary domain first, then any owned domain as fallback
   const BONFIDA = 'https://sns-sdk-proxy.bonfida.workers.dev';
 
-  // Try /domains/{owner} first — works even if no primary domain is set
-  try {
-    const res = await fetch(BONFIDA + '/domains/' + addr);
-    if (res.ok) {
-      const data = await res.json();
-      // Returns array of {domain, pubkey} or just domain strings depending on version
-      const domains = data?.result || data;
-      if (Array.isArray(domains) && domains.length > 0) {
-        const first = typeof domains[0] === 'string' ? domains[0] : domains[0]?.domain;
-        console.log('[Ghost] SNS /domains found:', first);
-        if (tryShowDomain(first)) return;
-      }
-    }
-  } catch(_) {}
-
-  // Try /reverse-lookup/{owner} — returns primary domain if set
+  // 1. Try /reverse-lookup/ — returns primary domain if set
   try {
     const res = await fetch(BONFIDA + '/reverse-lookup/' + addr);
     if (res.ok) {
@@ -3072,6 +3055,20 @@ async function _resolveAndShowSolDomain(addr, domainEl, updateName) {
       const domain = data?.result;
       console.log('[Ghost] SNS /reverse-lookup result:', domain);
       if (tryShowDomain(domain)) return;
+    }
+  } catch(_) {}
+
+  // 2. Fallback: /domains/ — returns all owned domains (works without primary set)
+  try {
+    const res = await fetch(BONFIDA + '/domains/' + addr);
+    if (res.ok) {
+      const data = await res.json();
+      const domains = data?.result || data;
+      if (Array.isArray(domains) && domains.length > 0) {
+        const first = typeof domains[0] === 'string' ? domains[0] : domains[0]?.domain;
+        console.log('[Ghost] SNS /domains fallback:', first);
+        if (tryShowDomain(first)) return;
+      }
     }
   } catch(_) {}
 
