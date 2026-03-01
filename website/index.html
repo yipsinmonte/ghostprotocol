@@ -3045,38 +3045,40 @@ async function _resolveAndShowSolDomain(addr, domainEl, updateName) {
     return false;
   };
 
-  // Direct RPC: derive reverse registry PDA and read the name from account data
-  // SNS reverse registry PDA = findProgramAddress([sha256("SPL Name Service" + addr), REVERSE_CLASS, zeros(32)], NAME_PROGRAM)
+  // SNS: getAllDomains pattern — getProgramAccounts filtered by owner at offset 32
+  // Mirrors SDK getAllDomains + performReverseLookup without needing external SDK
   const tryRPC = async () => {
     try {
       const NAME_PROGRAM = 'namesLPAXkSnS6VoK3M3AoUBYSbkTr3YUidbEMrCXLF';
-      const REVERSE_CLASS = '33m47vH6Eav6jr5Ry86XjhRft2jRBLDnDgPSHoquXi2Z';
-      const { PublicKey } = solanaWeb3;
-      const input = new TextEncoder().encode('SPL Name Service' + addr);
-      const hashBuf = await crypto.subtle.digest('SHA-256', input);
-      const hashBytes = new Uint8Array(hashBuf);
-      const classKey = new PublicKey(REVERSE_CLASS);
-      const programKey = new PublicKey(NAME_PROGRAM);
-      // SNS PDA seeds: [hash(32 bytes), nameClass(32 bytes), nameParent(32 zero bytes)]
-      const [reversePda] = await PublicKey.findProgramAddress([hashBytes, classKey.toBytes(), new Uint8Array(32)], programKey);
-      // Use public RPC for SNS — Helius free tier 404s on name registry accounts
-      const SNS_RPC = 'https://api.mainnet-beta.solana.com';
-      const res = await fetch(SNS_RPC, {
+      // getProgramAccounts: memcmp filter on owner field (offset 32) = wallet address
+      const res = await fetch(RPC_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 'sns', method: 'getAccountInfo',
-          params: [reversePda.toString(), { encoding: 'base64' }] })
+        body: JSON.stringify({ jsonrpc: '2.0', id: 'sns-all', method: 'getProgramAccounts',
+          params: [NAME_PROGRAM, { encoding: 'base64', filters: [
+            { memcmp: { offset: 32, bytes: addr } }
+          ]}]
+        })
       });
       const data = await res.json();
-      const b64 = data?.result?.value?.data?.[0];
-      if (!b64) return false;
-      // SNS Name Registry layout: 96-byte header, then u32 nameLen, then name bytes
-      const raw = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-      if (raw.length < 100) return false;
-      const nameLen = new DataView(raw.buffer).getUint32(96, true);
-      if (nameLen > 0 && nameLen < 100 && raw.length >= 100 + nameLen) {
-        const name = new TextDecoder().decode(raw.slice(100, 100 + nameLen)).replace(/ /g, '').trim();
-        console.log('[Ghost] SNS RPC domain:', name);
-        return tryShowDomain(name);
+      const accounts = data?.result;
+      if (!accounts || accounts.length === 0) { console.log('[Ghost] SNS: no accounts owned'); return false; }
+      console.log('[Ghost] SNS accounts owned:', accounts.length);
+      // Name Registry layout: 32 parent | 32 owner | 32 class | u32 nameLen | name bytes
+      // nameLen is at offset 96, name at offset 100
+      for (const acct of accounts) {
+        const b64 = acct?.account?.data?.[0];
+        if (!b64) continue;
+        const raw = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        if (raw.length < 100) continue;
+        const nameLen = new DataView(raw.buffer).getUint32(96, true);
+        if (nameLen > 0 && nameLen < 200 && raw.length >= 100 + nameLen) {
+          const name = new TextDecoder().decode(raw.slice(100, 100 + nameLen)).replace(/\0/g, '').trim();
+          // Only accept valid .sol domain names (lowercase alphanumeric + hyphens)
+          if (name && /^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(name)) {
+            console.log('[Ghost] SNS domain found:', name);
+            if (tryShowDomain(name)) return true;
+          }
+        }
       }
       return false;
     } catch(e) {
@@ -5831,7 +5833,7 @@ async function loadWalletTokens() {
 async function fetchTokenMetadata(tokens, mints) {
   // Step 1: Try Jupiter token list for established tokens
   try {
-    const res = await fetch('https://tokens.jup.ag/tokens?tags=verified');
+    const res = await fetch('https://lite-api.jup.ag/tokens/v1/tagged/verified');
     if (res.ok) {
       const list = await res.json();
       const byMint = {};
