@@ -3052,10 +3052,25 @@ async function _resolveAndShowSolDomain(addr, domainEl, updateName) {
   // domain registry data[100..] = name string
   const NAME_PROGRAM = 'namesLPAXkSnS6VoK3M3AoUBYSbkTr3YUidbEMrCXLF';
 
+  // SNS needs an RPC that allows getAccountInfo on name registry accounts
+  // Helius free tier blocks these — try public endpoints in order
+  const SNS_RPCS = [
+    'https://api.mainnet-beta.solana.com',
+    'https://solana-api.projectserum.com',
+    'https://rpc.ankr.com/solana',
+  ];
   const rpc = async (id, pubkey) => {
-    const r = await fetch(RPC_URL, { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ jsonrpc:'2.0', id, method:'getAccountInfo', params:[pubkey, {encoding:'base64'}] }) });
-    return r.json();
+    for (const endpoint of SNS_RPCS) {
+      try {
+        const r = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ jsonrpc:'2.0', id, method:'getAccountInfo', params:[pubkey, {encoding:'base64'}] }) });
+        const d = await r.json();
+        if (d?.error || !r.ok) { console.warn('[Ghost] SNS', endpoint.slice(8,30), r.status, d?.error?.message); continue; }
+        console.log('[Ghost] SNS RPC ok:', endpoint.slice(8,30));
+        return d;
+      } catch(e) { console.warn('[Ghost] SNS RPC fail:', e.message); }
+    }
+    return null;
   };
 
   const readName = (b64) => {
@@ -3096,8 +3111,10 @@ async function _resolveAndShowSolDomain(addr, domainEl, updateName) {
   // Fallback: Bonfida proxy
   try {
     const res = await fetch('https://sns-sdk-proxy.bonfida.workers.dev/reverse-lookup/' + addr);
-    if (res.ok) { const d = await res.json(); if (tryShowDomain(d?.result)) return; }
-  } catch(_) {}
+    const d = await res.json();
+    console.log('[Ghost] SNS proxy raw:', JSON.stringify(d));
+    if (tryShowDomain(d?.result)) return;
+  } catch(e) { console.warn('[Ghost] SNS proxy fail:', e.message); }
 
   console.log('[Ghost] SNS: no primary domain for', addr.slice(0,8))
 }
