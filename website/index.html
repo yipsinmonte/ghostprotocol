@@ -5831,7 +5831,7 @@ async function loadWalletTokens() {
 async function fetchTokenMetadata(tokens, mints) {
   // Step 1: Try Jupiter token list for established tokens
   try {
-    const res = await fetch('https://api.jup.ag/tokens/v1?tags=verified', {headers:{'x-api-key':'8bef3e9f-8dca-495b-8b42-6df346fda48e'}});
+    const res = await fetch('https://api.jup.ag/tokens/v1/tagged/verified', {headers:{'x-api-key':'8bef3e9f-8dca-495b-8b42-6df346fda48e'}});
     if (res.ok) {
       const list = await res.json();
       const byMint = {};
