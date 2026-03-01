@@ -5829,24 +5829,23 @@ async function loadWalletTokens() {
 
 // Fetch token name + image from on-chain Metaplex metadata
 async function fetchTokenMetadata(tokens, mints) {
-  // Step 1: Try Jupiter token list for established tokens
-  try {
-    const res = await fetch('https://api.jup.ag/tokens/v1/tagged/verified', {headers:{'x-api-key':'8bef3e9f-8dca-495b-8b42-6df346fda48e'}});
-    if (res.ok) {
-      const list = await res.json();
-      const byMint = {};
-      for (const t of list) byMint[t.address] = t;
-      for (const token of tokens) {
-        if (!mints.includes(token.mint)) continue;
-        const meta = byMint[token.mint];
-        if (meta) {
-          token.symbol = meta.symbol || token.symbol;
-          token.name = meta.name;
-          if (meta.logoURI) token.logoUrl = meta.logoURI;
-        }
+  // Step 1: Jupiter Tokens API v2 — search each mint individually
+  await Promise.all(mints.map(async mint => {
+    const token = tokens.find(t => t.mint === mint);
+    if (!token) return;
+    try {
+      const res = await fetch(`https://api.jup.ag/tokens/v2/search?query=${mint}`, {headers:{'x-api-key':'8bef3e9f-8dca-495b-8b42-6df346fda48e'}});
+      if (!res.ok) return;
+      const results = await res.json();
+      const meta = Array.isArray(results) ? results.find(t => (t.address||t.id) === mint) : null;
+      if (meta) {
+        token.symbol = meta.symbol || token.symbol;
+        token.name = meta.name || token.name;
+        const logo = meta.logoURI || meta.icon || meta.logo;
+        if (logo) token.logoUrl = logo;
       }
-    }
-  } catch(e) {}
+    } catch(e) {}
+  }));
 
   // Step 2: For any still-unknown tokens (pump.fun etc), use Helius getAsset
   const stillUnknown = tokens.filter(t => mints.includes(t.mint) && t.symbol?.includes('...'));
