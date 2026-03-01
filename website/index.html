@@ -3045,74 +3045,37 @@ async function _resolveAndShowSolDomain(addr, domainEl, updateName) {
     return false;
   };
 
-  // SNS: getAllDomains pattern — getProgramAccounts filtered by owner at offset 32
-  // Mirrors SDK getAllDomains + performReverseLookup without needing external SDK
-  const tryRPC = async () => {
-    try {
-      const NAME_PROGRAM = 'namesLPAXkSnS6VoK3M3AoUBYSbkTr3YUidbEMrCXLF';
-      // getProgramAccounts: memcmp filter on owner field (offset 32) = wallet address
-      const res = await fetch(RPC_URL, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 'sns-all', method: 'getProgramAccounts',
-          params: [NAME_PROGRAM, { encoding: 'base64', filters: [
-            { memcmp: { offset: 32, bytes: addr } }
-          ]}]
-        })
-      });
+  // SNS resolution: try Bonfida proxy /domains/ endpoint (returns all owned domains),
+  // fall back to /reverse-lookup/ for primary domain
+  const BONFIDA = 'https://sns-sdk-proxy.bonfida.workers.dev';
+
+  // Try /domains/{owner} first — works even if no primary domain is set
+  try {
+    const res = await fetch(BONFIDA + '/domains/' + addr);
+    if (res.ok) {
       const data = await res.json();
-      const accounts = data?.result;
-      if (!accounts || accounts.length === 0) { console.log('[Ghost] SNS: no accounts owned'); return false; }
-      console.log('[Ghost] SNS accounts owned:', accounts.length);
-      // Name Registry layout: 32 parent | 32 owner | 32 class | u32 nameLen | name bytes
-      // nameLen is at offset 96, name at offset 100
-      for (const acct of accounts) {
-        const b64 = acct?.account?.data?.[0];
-        if (!b64) continue;
-        const raw = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-        if (raw.length < 100) continue;
-        const nameLen = new DataView(raw.buffer).getUint32(96, true);
-        if (nameLen > 0 && nameLen < 200 && raw.length >= 100 + nameLen) {
-          const name = new TextDecoder().decode(raw.slice(100, 100 + nameLen)).replace(/\0/g, '').trim();
-          // Only accept valid .sol domain names (lowercase alphanumeric + hyphens)
-          if (name && /^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(name)) {
-            console.log('[Ghost] SNS domain found:', name);
-            if (tryShowDomain(name)) return true;
-          }
-        }
+      // Returns array of {domain, pubkey} or just domain strings depending on version
+      const domains = data?.result || data;
+      if (Array.isArray(domains) && domains.length > 0) {
+        const first = typeof domains[0] === 'string' ? domains[0] : domains[0]?.domain;
+        console.log('[Ghost] SNS /domains found:', first);
+        if (tryShowDomain(first)) return;
       }
-      return false;
-    } catch(e) {
-      console.warn('[Ghost] SNS RPC lookup failed:', e.message);
-      return false;
     }
-  };
+  } catch(_) {}
 
-  // REST fallbacks
-  const tryRest = () => {
-    fetch('https://sns-sdk-proxy.bonfida.workers.dev/reverse-lookup/' + addr)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (tryShowDomain(data?.result)) return;
-        fetch('https://api.alldomains.id/v1/reverse/' + addr)
-          .then(r => r.ok ? r.json() : null)
-          .then(d => tryShowDomain(d?.domain || d?.name || d?.result))
-          .catch(() => {});
-      }).catch(() => {
-        fetch('https://api.alldomains.id/v1/reverse/' + addr)
-          .then(r => r.ok ? r.json() : null)
-          .then(d => tryShowDomain(d?.domain || d?.name || d?.result))
-          .catch(() => {});
-      });
-  };
+  // Try /reverse-lookup/{owner} — returns primary domain if set
+  try {
+    const res = await fetch(BONFIDA + '/reverse-lookup/' + addr);
+    if (res.ok) {
+      const data = await res.json();
+      const domain = data?.result;
+      console.log('[Ghost] SNS /reverse-lookup result:', domain);
+      if (tryShowDomain(domain)) return;
+    }
+  } catch(_) {}
 
-  if (solanaWeb3?.PublicKey) {
-    console.log('[Ghost] SNS: trying direct RPC for', addr.slice(0,8) + '...');
-    const found = await tryRPC();
-    if (!found) { console.log('[Ghost] SNS RPC miss, trying REST'); tryRest(); }
-  } else {
-    console.log('[Ghost] SNS: web3 not ready, using REST');
-    tryRest();
-  }
+  console.log('[Ghost] SNS: no domain found for', addr.slice(0,8))
 }
 
 // ─── Copy wallet address ──────────────────────────────────────
@@ -5833,7 +5796,7 @@ async function loadWalletTokens() {
 async function fetchTokenMetadata(tokens, mints) {
   // Step 1: Try Jupiter token list for established tokens
   try {
-    const res = await fetch('https://lite-api.jup.ag/tokens/v1/tagged/verified');
+    const res = await fetch('https://token.jup.ag/strict');
     if (res.ok) {
       const list = await res.json();
       const byMint = {};
