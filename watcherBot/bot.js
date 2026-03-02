@@ -46,8 +46,9 @@ const DISC = {
 // GhostAccount account discriminator — sha256("account:GhostAccount")[0:8]
 const GHOST_ACCOUNT_DISC = Buffer.from([159, 102, 98, 152, 27, 151, 132, 88]);
 
-const TOKEN_PROG_ADDR  = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-const ASSOC_TOKEN_ADDR = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1bso';
+const TOKEN_PROG_ADDR   = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const TOKEN22_PROG_ADDR = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'; // Token-2022 (pump.fun)
+const ASSOC_TOKEN_ADDR  = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1bso';
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
 
@@ -59,6 +60,7 @@ const gpaConn      = new Connection(GPA_RPC_URL,'confirmed');
 const programIdPk  = new PublicKey(PROGRAM_ID);
 const ghostMintPk  = new PublicKey(GHOST_MINT_ADDR);
 const tokenProgPk  = new PublicKey(TOKEN_PROG_ADDR);
+const token22ProgPk = new PublicKey(TOKEN22_PROG_ADDR);
 const assocTokenPk = new PublicKey(ASSOC_TOKEN_ADDR);
 
 console.log('👻 GHOST Executor Bot starting...');
@@ -190,7 +192,7 @@ function buildCheckSilence(ghost) {
   const ownerPk      = new PublicKey(ghost.owner);
   const ghostPdaPk   = new PublicKey(ghost.pubkey);
   const [stakeVault] = deriveStakeVault(ownerPk);
-  const botAta       = deriveATA(botKp.publicKey, ghostMintPk);
+  const botAta       = deriveATA(botKp.publicKey, ghostMintPk, token22ProgPk); // $GHOST is Token-2022
 
   return new TransactionInstruction({
     programId: programIdPk,
@@ -200,7 +202,7 @@ function buildCheckSilence(ghost) {
       { pubkey: ghostMintPk,      isSigner: false, isWritable: false }, // ghost_mint
       { pubkey: stakeVault,       isSigner: false, isWritable: true  }, // ghost_stake_vault
       { pubkey: botAta,           isSigner: false, isWritable: true  }, // caller_token_account (bounty)
-      { pubkey: tokenProgPk,      isSigner: false, isWritable: false }, // token_program
+      { pubkey: token22ProgPk,     isSigner: false, isWritable: false }, // token_program (Token-2022)
     ],
     data: DISC.check_silence,
   });
