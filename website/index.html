@@ -1653,21 +1653,30 @@ async function fetchGhostCount() {
       if (el) el.textContent = count.toLocaleString();
       console.log('[Ghost] On-chain ghost count:', count);
     }
-    // ── Parse interval from each account to compute live average ──
-    // interval_seconds is i64 at a known offset after discriminator+fields
-    // discriminator(8) + owner(32) + vault(32) + stake_vault(32) + last_ping(8) + interval = offset 112
-    const INTERVAL_OFFSET = 112;
+    // ── Parse interval dynamically (recovery_wallets is variable-length) ──
     let totalDays = 0, validCount = 0;
     for (const acct of accounts) {
       try {
         const raw = atob(acct.account.data[0]);
         const bytes = new Uint8Array(raw.length);
         for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        if (bytes.length < 1220) continue; // skip pre-v1.7 accounts
         const view = new DataView(bytes.buffer);
-        const intervalSec = Number(view.getBigInt64(INTERVAL_OFFSET, true));
+        let o = 8; // skip discriminator
+        o += 32;   // owner: Pubkey
+        // recovery_wallets: [Option<Pubkey>; 3] — variable length
+        for (let r = 0; r < 3; r++) {
+          const tag = bytes[o]; o += 1;
+          if (tag === 1) o += 32; // Some(Pubkey)
+        }
+        // last_heartbeat: i64
+        o += 8;
+        // interval_seconds: i64
+        const intervalSec = Number(view.getBigInt64(o, true));
         const days = intervalSec / 86400;
-        if (days >= 1 && days <= 3650) { totalDays += days; validCount++; }
-      } catch(_) {}
+        console.log('[Ghost] Account interval:', days, 'days (raw sec:', intervalSec, ')');
+        if (days >= 1 && days <= 36500) { totalDays += days; validCount++; }
+      } catch(e) { console.log('[Ghost] interval parse err:', e); }
     }
     if (validCount > 0) {
       const avgDays = Math.round(totalDays / validCount);
@@ -1676,6 +1685,8 @@ async function fetchGhostCount() {
         ? (avgDays / 365).toFixed(1).replace(/\.0$/, '') + 'y'
         : avgDays + 'd';
       console.log('[Ghost] Avg heartbeat:', avgDays, 'days from', validCount, 'accounts');
+    } else {
+      console.log('[Ghost] No valid intervals found from', accounts.length, 'accounts');
     }
   } catch(e) { console.log('[Ghost] ghostCount fetch failed', e); }
 }
@@ -2804,6 +2815,12 @@ async function fetchOnChainHistory() {
 function parseGhostAccount(bytes) {
   const view = new DataView(bytes.buffer);
   let offset = 8; // skip discriminator
+  // Pre-v1.7 accounts have different layout — don't parse them fully
+  // Just mark as needs-migration; migrationCard will show
+  if (bytes.length < 1220) {
+    ghostState.ghost.status = 'needs-migration';
+    return;
+  }
 
   // GhostAccount field layout — Borsh encoding rules:
   //   Option<T>::None = 1 byte (0x00 tag only)
@@ -3048,7 +3065,7 @@ function parseGhostAccount(bytes) {
 
 function updateDashboardUI() {
   const g = ghostState.ghost;
-  const isNone = g.status === 'none';
+  const isNone = g.status === 'none' || g.status === 'needs-migration';
 
   // ── Sidebar nav lock/unlock ──────────────────────────────────
   const lockedIds = ['nav-vault','nav-beneficiaries','nav-heartbeat','nav-recovery','nav-settings'];
@@ -6398,11 +6415,12 @@ async function dbMigrateAccount() {
   const _ok = await ghostConfirm({
     icon: '🔄',
     title: 'Migrate to v1.7',
-    message: 'This will abandon your current ghost account (burns 50% staked $GHOST) and open the registration form. Your vault assets are NOT affected. Proceed?',
+    message: 'This will close your current ghost account and open the registration form for a fresh v1.7 account. Your vault assets are NOT affected — they stay in the vault PDA. Proceed?',
     okLabel: 'MIGRATE', danger: true
   });
   if (!_ok) return;
-  await dbAbandon(true); // skipConfirm=true since we already confirmed above
+  addActivityRow('🔄 Migrated account to v1.7', '', '🔄');
+  await dbAbandon(true);
 }
 
 function toggleRecoveryWithdraw(idx, val) {
@@ -7665,9 +7683,12 @@ async function dbAbandon(skipConfirm) {
       </div>
     </div>`;
 
-  // Helper to restart  
+  // Helper to restart
   window.dbSummonNew = function() {
+    // Clear all session data so fresh load doesn't re-parse stale account
+    try { sessionStorage.clear(); localStorage.removeItem('ghostSession'); } catch(_) {}
     ghostState.ghost = { status: 'none', stakedGhost: 0, pingCount: 0, beneficiaries: [], wholeVaultShares: [] };
+    ghostState.activityLog = [];
     saveSession();
     location.reload();
   };
