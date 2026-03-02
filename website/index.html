@@ -2943,23 +2943,55 @@ function parseGhostAccount(bytes) {
     const _validInterval = interval >= 3600 && interval <= 315360000;
     const _validRegistered = registeredAt >= 1600000000 && registeredAt <= 2000000000;
     const _validPingCount = pingCount <= 1000000;
-    const _validBenefCount = benefCount <= 10;
+    let _validBenefCount = benefCount <= 10;
 
-    ghostState.ghost.intervalSeconds = _validInterval ? interval : null;
-    ghostState.ghost.gracePeriodSeconds = _validInterval ? grace : null;
+    // ── Legacy layout detection: 1221-byte account with old struct offsets ──
+    // If data[73..81] parsed as i64 is a valid recent timestamp, this is a
+    // legacy account that was migrated from an older layout — use hardcoded offsets.
+    const _legacyLastBeat = Number(view.getBigInt64(73, true));
+    const _isLegacyLayout = bytes.length >= 1221
+      && (_legacyLastBeat >= 1700000000 && _legacyLastBeat <= 1800000000)
+      && !_validInterval;
+
+    let _lastBeat = lastBeat, _interval = interval, _grace = grace;
+    let _awakened = awakened, _executed = executed;
+    let _staked = staked, _registeredAt = registeredAt;
+    let _pingCount = pingCount, _benefCount = benefCount;
+
+    if (_isLegacyLayout) {
+      console.log('[Ghost] Legacy layout detected — using hardcoded offsets');
+      _lastBeat     = Number(view.getBigInt64(73, true));
+      _interval     = Number(view.getBigInt64(81, true));
+      _grace        = Number(view.getBigInt64(89, true));
+      _awakened     = bytes[99] === 1;
+      _staked       = Number(view.getBigUint64(101, true));
+      _executed     = bytes[107] === 1;
+      _registeredAt = Number(view.getBigInt64(111, true));
+      _pingCount    = Number(view.getBigUint64(119, true));
+      _benefCount   = bytes[127];
+      if (_benefCount > 10) { _benefCount = 0; _validBenefCount = false; }
+      else _validBenefCount = true;
+    }
+
+    const _vInterval   = _interval >= 3600 && _interval <= 315360000;
+    const _vRegistered = _registeredAt >= 1600000000 && _registeredAt <= 2000000000;
+    const _vPingCount  = _pingCount <= 1000000;
+
+    ghostState.ghost.intervalSeconds = _vInterval ? _interval : null;
+    ghostState.ghost.gracePeriodSeconds = _vInterval ? _grace : null;
     // Chain is authoritative — always use on-chain value when non-zero
-    const chainHeartbeatMs = lastBeat * 1000;
+    const chainHeartbeatMs = _lastBeat * 1000;
     if (chainHeartbeatMs > 0) {
       ghostState.ghost.lastHeartbeat = chainHeartbeatMs;
     }
     if (recoveryWallets.some(w => w !== null)) ghostState.ghost.recoveryWallet = recoveryWallets.find(w => w !== null);
-    ghostState.ghost.awakened = awakened;
+    ghostState.ghost.awakened = _awakened;
     ghostState.ghost.awakenedAt = awakenedAt ? awakenedAt * 1000 : null;
-    ghostState.ghost.executed = executed;
-    ghostState.ghost.stakedGhost = staked / 1_000_000; // convert from base units to token units
-    ghostState.ghost.pingCount = _validPingCount ? pingCount : 0;
-    ghostState.ghost.beneficiaryCount = _validBenefCount ? benefCount : 0;
-    ghostState.ghost.registeredAt = _validRegistered ? registeredAt * 1000 : null;
+    ghostState.ghost.executed = _executed;
+    ghostState.ghost.stakedGhost = _staked / 1_000_000; // convert from base units to token units
+    ghostState.ghost.pingCount = _vPingCount ? _pingCount : 0;
+    ghostState.ghost.beneficiaryCount = _validBenefCount ? _benefCount : 0;
+    ghostState.ghost.registeredAt = _vRegistered ? _registeredAt * 1000 : null;
 
     // Decode beneficiaries[10] from chain — 75 bytes each:
     // recipient(32) + amount(u64=8) + token_mint(Option<Pubkey>=33) + action(u8=1) + executed(bool=1) = 75
@@ -2974,8 +3006,8 @@ function parseGhostAccount(bytes) {
     const _chainBenefs = [];
     for (let _bi = 0; _bi < 10; _bi++) {
       const recipBytes = bytes.slice(offset, offset + 32); offset += 32;
-      // Sanity: if beneficiary_count was garbage, skip all slots
-      if (!_validBenefCount) { offset += 8 + 1 + 1 + 1; continue; }
+      // Sanity: if beneficiary_count was garbage or legacy layout, skip all slots
+      if (!_validBenefCount || _isLegacyLayout) { offset += 8 + 1 + 1 + 1; continue; }
       const amtRaw = view.getBigUint64(offset, true); offset += 8;
       const mintTag = bytes[offset]; offset += 1;
       let mintPk = null;
@@ -6629,10 +6661,12 @@ async function dbMigrateAccount() {
     if (conf.value?.err) throw new Error('TX failed: ' + JSON.stringify(conf.value.err));
 
     ghostState.ghost._schemaVersion = 18;
+    ghostState.ghost._needsMigration = false;
+    ghostState.ghost.needsMigration = false;
     addActivityRow('🔄 Ghost migrated to v1.8', sig.slice(0,4)+'...'+sig.slice(-4));
     showNotif('✅ Account migrated to v1.8 successfully!', 'green');
 
-    // Hide migration banners — account is now current
+    // Hide migration banners immediately — don't wait for re-fetch
     const _migBanner = document.getElementById('overviewMigrationBanner');
     if (_migBanner) _migBanner.style.display = 'none';
     const _migCard = document.getElementById('migrationCard');
