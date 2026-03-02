@@ -798,6 +798,15 @@
         <div class="db-page-title">Your Ghost</div>
         <div class="db-page-sub">Vault Status · Digital Legacy Protocol</div>
 
+        <!-- Migration required banner (shown for pre-v1.7 accounts) -->
+        <div id="overviewMigrationBanner" style="display:none;background:rgba(255,170,51,0.08);border:1px solid rgba(255,170,51,0.4);border-radius:8px;padding:20px 24px;margin-bottom:20px">
+          <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:15px;color:var(--amber);margin-bottom:8px">⚠️ Account Migration Required</div>
+          <div style="font-family:'Share Tech Mono',monospace;font-size:12px;color:#c0a060;line-height:1.8;margin-bottom:16px">
+            Your ghost was registered on an older version of the protocol. Re-register to upgrade to v1.7. Your vault assets are not affected.
+          </div>
+          <button onclick="dbMigrateAccount()" style="background:rgba(255,170,51,0.15);border:1px solid rgba(255,170,51,0.5);color:var(--amber);padding:10px 24px;border-radius:6px;cursor:pointer;font-family:'Share Tech Mono',monospace;font-size:12px;letter-spacing:0.1em">🔄 RE-REGISTER NOW</button>
+        </div>
+
         <!-- Wallet identity -->
         <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;background:rgba(102,51,255,0.06);border:1px solid rgba(102,51,255,0.14);margin-bottom:20px">
           <!-- Avatar: profile pic if set, else identicon -->
@@ -1681,9 +1690,7 @@ async function fetchGhostCount() {
     if (validCount > 0) {
       const avgDays = Math.round(totalDays / validCount);
       const el = document.getElementById('avgHeartbeat');
-      if (el) el.textContent = avgDays >= 365
-        ? (avgDays / 365).toFixed(1).replace(/\.0$/, '') + 'y'
-        : avgDays + 'd';
+      if (el) el.textContent = avgDays + 'd';
       console.log('[Ghost] Avg heartbeat:', avgDays, 'days from', validCount, 'accounts');
     } else {
       console.log('[Ghost] No valid intervals found from', accounts.length, 'accounts');
@@ -2151,8 +2158,32 @@ async function connectWallet(name) {
     ghostState.walletAddress = pubkey.slice(0,4) + '...' + pubkey.slice(-4);
     ghostState.publicKey = pubkey;
     ghostState.provider = provider;
-    const _onAccountChange = () => {
-      showNotif('👻 Wallet account changed — please reconnect.', '');
+    const _onAccountChange = async (newPubkey) => {
+      // Wallet switched to different account — reload fresh state for new wallet
+      showNotif('👻 Wallet changed — loading new account…', '');
+      // Reset all ghost state
+      ghostState.ghost = { status:'none', lastHeartbeat:null, intervalSeconds:365*86400, gracePeriodSeconds:30*86400, awakenedAt:null, executed:false, stakedGhost:0, pingCount:0, vaultBalance:0, recoveryWallet:null, beneficiaries:[], wholeVaultAction:0 };
+      ghostState.walletTokens = [];
+      ghostState.vaultTokens = [];
+      ghostState.activityLog = [];
+      ghostState.pingHistory = [];
+      // If new pubkey provided, derive new PDAs and reload
+      if (newPubkey) {
+        const pk = typeof newPubkey === 'string' ? newPubkey : newPubkey?.toBase58?.() || '';
+        if (pk) {
+          ghostState.publicKey = pk;
+          ghostState.walletAddress = pk.slice(0,4)+'...'+pk.slice(-4);
+          await deriveAndSetPDAs(pk);
+          saveSession();
+          // Reload ghost account for new wallet
+          try { await fetchGhostAccount(); } catch(e) {}
+          // Return to overview with fresh state
+          dbShowPage('overview', document.getElementById('nav-overview'));
+          updateDashboardUI();
+          loadWalletTokens();
+          return;
+        }
+      }
       disconnectWallet();
     };
     try { provider.off?.('accountChanged', _onAccountChange); provider.on?.('accountChanged', _onAccountChange); } catch(e) {}
@@ -3066,6 +3097,11 @@ function parseGhostAccount(bytes) {
 function updateDashboardUI() {
   const g = ghostState.ghost;
   const isNone = g.status === 'none' || g.status === 'needs-migration';
+  const isMigration = g.status === 'needs-migration';
+
+  // Show/hide overview migration banner
+  const _migBanner = document.getElementById('overviewMigrationBanner');
+  if (_migBanner) _migBanner.style.display = isMigration ? 'block' : 'none';
 
   // ── Sidebar nav lock/unlock ──────────────────────────────────
   const lockedIds = ['nav-vault','nav-beneficiaries','nav-heartbeat','nav-recovery','nav-settings'];
@@ -3740,11 +3776,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
       // Fetch fresh ghost state from chain
-      if (ghostState.ghostPda) { try { await fetchGhostAccount(); } catch(e) {} }
+      if (ghostState.ghostPda) {
+        try { await fetchGhostAccount(); } catch(e) {}
+        // Re-run UI update after chain state is known — locks/unlocks nav correctly
+        updateDashboardUI();
+      }
     }
 
     openDashboard();
-    if (ghostState.ghost.status !== 'none' && lastPage !== 'init') dbShowPage(lastPage, document.getElementById('nav-' + lastPage));
+    // Only restore last page if ghost is active — not for none/needs-migration
+    const _status = ghostState.ghost.status;
+    if (_status !== 'none' && _status !== 'needs-migration' && lastPage !== 'init') {
+      dbShowPage(lastPage, document.getElementById('nav-' + lastPage));
+    } else {
+      dbShowPage('overview', document.getElementById('nav-overview'));
+    }
     loadWalletTokens();
   }, 100);
 });
