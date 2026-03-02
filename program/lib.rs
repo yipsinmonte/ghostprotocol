@@ -4,7 +4,35 @@
 //   - MIN_GRACE_PERIOD reduced from 24h to 0 (allow instant execution / zero grace)
 //   - Added migrate_ghost instruction: on-chain account layout upgrade (v1.7 → v1.8)
 //   - abandon_ghost is now callable from frontend (was stub)
-//   - GHOST_ACCOUNT_SPACE_V18 reserved for future migrations
+//   - schema_version properly added as last field in GhostAccount struct
+//   - New accounts initialize with schema_version = SCHEMA_VERSION_V18
+//
+// ═══════════════════════════════════════════════════════════════════════
+// UPGRADE GUIDE — READ THIS BEFORE EVERY FUTURE PROGRAM VERSION
+// ═══════════════════════════════════════════════════════════════════════
+//
+// ADDING A NEW FIELD (e.g. for v1.9):
+//   1. Append the new field at the END of GhostAccount struct. Never reorder or insert.
+//   2. Increase GHOST_ACCOUNT_SPACE by the byte size of the new field.
+//   3. Add a new SCHEMA_VERSION_V19: u8 = 19 constant below.
+//   4. Update CURRENT_SCHEMA_VERSION to point to the new constant.
+//   5. In initialize_ghost: set new_field = default_value; schema_version = CURRENT_SCHEMA_VERSION;
+//   6. In migrate_ghost: add realloc to new GHOST_ACCOUNT_SPACE, set new_field = default_value,
+//      set schema_version = CURRENT_SCHEMA_VERSION.
+//   7. In the frontend: bump MIN_SUPPORTED_VERSION and gate new UI features with isVersionSufficient().
+//
+// NEVER:
+//   - Reorder existing fields (breaks Borsh deserialization on all existing accounts)
+//   - Remove or rename existing fields (use _deprecated_fieldname: u8 tombstones instead)
+//   - Change a field's type (same byte-break risk as reordering)
+//   - Decrease GHOST_ACCOUNT_SPACE
+//
+// MIGRATION PHILOSOPHY:
+//   - Old accounts are NOT broken — they just see a migration banner in the UI
+//   - New features are gated in the frontend via isVersionSufficient(minVersion)
+//   - migrate_ghost is the single upgrade path: realloc + fill defaults + bump schema_version
+//   - Existing core features (ping, heartbeat, beneficiaries, vault) always work regardless of version
+// ═══════════════════════════════════════════════════════════════════════
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{self, Burn, TokenAccount, TokenInterface, TransferChecked, Mint};
 
@@ -19,9 +47,20 @@ pub const MAX_BENEFICIARIES: usize = 10;
 pub const MAX_RECOVERY_WALLETS: usize = 3;
 pub const SILENCE_BOUNTY_BPS: u64 = 500;
 pub const BURN_ON_ABANDON_BPS: u64 = 5_000;
-pub const GHOST_ACCOUNT_SPACE: usize = 1220;     // v1.7 layout (unchanged — migrate_ghost writes same layout)
-pub const SCHEMA_VERSION_V17: u8 = 17;           // legacy accounts missing this field are pre-v1.7
-pub const SCHEMA_VERSION_V18: u8 = 18;           // current version written by initialize_ghost + migrate_ghost
+// ── Schema version constants ─────────────────────────────────────────────
+// When adding a new version: add SCHEMA_VERSION_VXX constant, update CURRENT_SCHEMA_VERSION,
+// update GHOST_ACCOUNT_SPACE, and follow the UPGRADE GUIDE at the top of this file.
+pub const SCHEMA_VERSION_V17: u8 = 17;           // legacy accounts — schema_version field did not exist yet
+pub const SCHEMA_VERSION_V18: u8 = 18;           // v1.8: schema_version added as last struct field
+pub const CURRENT_SCHEMA_VERSION: u8 = SCHEMA_VERSION_V18; // always points to latest — update on each upgrade
+
+// ── Account space ────────────────────────────────────────────────────────
+// GHOST_ACCOUNT_SPACE must equal the exact Borsh-serialized byte size of GhostAccount
+// (excluding the 8-byte Anchor discriminator prefix added automatically).
+// When adding a new field: increase this by the field's byte size.
+//   v1.7 = 1220 bytes (schema_version was a raw trailing byte, not in struct)
+//   v1.8 = 1221 bytes (schema_version: u8 added as proper last struct field)
+pub const GHOST_ACCOUNT_SPACE: usize = 1221;
 
 fn is_recovery_wallet(wallets: &[Option<Pubkey>; 3], key: Pubkey) -> bool {
     wallets.iter().any(|slot| slot.map_or(false, |w| w == key))
@@ -68,6 +107,10 @@ pub mod ghost_protocol {
         for i in 0..10 {
             ghost.beneficiaries[i] = Beneficiary::default();
         }
+        // v1.8: set schema_version on new accounts so they never need migration.
+        // Future versions: update this line to use CURRENT_SCHEMA_VERSION (which you
+        // should update to point to the new SCHEMA_VERSION_VXX constant).
+        ghost.schema_version = CURRENT_SCHEMA_VERSION;
 
         let cpi_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
@@ -507,29 +550,31 @@ pub mod ghost_protocol {
         Ok(())
     }
 
-    /// migrate_ghost — upgrades a pre-v1.8 GhostAccount to v1.8 layout in-place.
+    /// migrate_ghost — upgrades a pre-v1.8 GhostAccount to the current layout.
     ///
-    /// Background: When the program is upgraded to v1.8, existing accounts are 1220 bytes
-    /// (the v1.7 layout). The v1.8 layout adds `schema_version: u8` at the end, making
-    /// the canonical size 1221 bytes. This instruction:
-    ///   1. Verifies the caller is the ghost owner (via Accounts constraint)
-    ///   2. Anchor realloc constraint resizes the account from 1220 → 1221 bytes
-    ///      (owner pays the extra lamport for rent-exemption via system_program)
-    ///   3. Writes SCHEMA_VERSION_V18 at offset 1220
-    ///   4. Preserves all existing field data unchanged (realloc::zero = false)
-    ///   5. Emits MigrationComplete event
+    /// HOW MIGRATION WORKS (read before modifying):
+    ///   1. Reallocs the account to GHOST_ACCOUNT_SPACE if it's smaller (pays rent diff via system_program).
+    ///   2. Sets any new fields introduced since the account was created to their sensible defaults.
+    ///   3. Bumps schema_version to CURRENT_SCHEMA_VERSION so the frontend unlocks new features.
     ///
-    /// Idempotent: if the account is already at 1221+ bytes, the realloc constraint
-    /// is a no-op and the instruction re-writes the version byte harmlessly.
+    /// FOR FUTURE VERSIONS (e.g. v1.9):
+    ///   - Add `ghost.your_new_field = default_value;` below the existing field assignments.
+    ///   - GHOST_ACCOUNT_SPACE will have been increased — the realloc handles the size change.
+    ///   - Update CURRENT_SCHEMA_VERSION constant to SCHEMA_VERSION_V19.
+    ///   - Do NOT change the realloc target — always use GHOST_ACCOUNT_SPACE.
     ///
-    /// Security: only callable by ghost.owner. Cannot be called on closed accounts.
+    /// Security: only callable by ghost.owner. Idempotent — safe to run multiple times.
     /// All beneficiaries, heartbeat, stake, vault assets — all untouched.
     pub fn migrate_ghost(ctx: Context<MigrateGhost>) -> Result<()> {
         let ghost_info = ctx.accounts.ghost.to_account_info();
         let owner = ctx.accounts.ghost.owner;
         let clock = Clock::get()?;
         let current_len = ghost_info.data_len();
-        let target_len = GHOST_ACCOUNT_SPACE + 1;
+
+        // Realloc to current GHOST_ACCOUNT_SPACE if account is smaller.
+        // GHOST_ACCOUNT_SPACE grows by the byte size of each new field added per version.
+        // The +8 accounts for the Anchor discriminator prefix.
+        let target_len = GHOST_ACCOUNT_SPACE + 8;
         if current_len < target_len {
             let rent = Rent::get()?;
             let new_minimum = rent.minimum_balance(target_len);
@@ -549,20 +594,25 @@ pub mod ghost_protocol {
             }
             ghost_info.realloc(target_len, false)?;
         }
-        {
-            let mut data = ghost_info.try_borrow_mut_data()?;
-            if data.len() > GHOST_ACCOUNT_SPACE {
-                data[GHOST_ACCOUNT_SPACE] = SCHEMA_VERSION_V18;
-            }
-        }
+
+        // Set new fields introduced in v1.8.
+        // For each future version, append new field assignments here — do NOT remove old ones.
+        // v1.8 fields:
+        ctx.accounts.ghost.schema_version = CURRENT_SCHEMA_VERSION;
+        // v1.9 fields would go here:
+        // ctx.accounts.ghost.your_new_field = default_value;
+
         emit!(MigrationComplete {
             soul: owner,
             old_size: current_len as u16,
             new_size: target_len as u16,
-            schema_version: SCHEMA_VERSION_V18,
+            schema_version: CURRENT_SCHEMA_VERSION,
             timestamp: clock.unix_timestamp,
         });
-        msg!("Ghost migrated to v1.8 for {} — {} -> {} bytes, schema_version={}", owner, current_len, target_len, SCHEMA_VERSION_V18);
+        msg!(
+            "Ghost migrated for {} — {} -> {} bytes, schema_version={}",
+            owner, current_len, target_len, CURRENT_SCHEMA_VERSION
+        );
         Ok(())
     }
 }
@@ -606,18 +656,20 @@ pub struct GhostAccount {
     pub whole_vault_action: u8,                  // 1
     pub display_name: [u8; 32],                  // 32
     pub image_uri: [u8; 128],                    // 128
-    // v1.8: schema_version was planned as a trailing byte but is NOT yet in the Anchor account struct.
-    // Anchor derives account space from the struct — adding schema_version to the struct would
-    // change the Borsh layout and break existing parsers. Instead, we track version by account size:
-    //   1220 bytes = v1.7 (needs migration)
-    //   1221 bytes = v1.8 (migrated or freshly initialized with migrate_ghost run)
-    // migrate_ghost reallocates 1220 → 1221 and writes the version byte at offset 1220.
-    // New accounts initialized via initialize_ghost start at 1220; owner runs migrate_ghost once.
-    // Future versions will follow the same pattern: new instruction + realloc.
+    // ── Versioning — always the last field ──────────────────────────────────
+    // schema_version tracks which program version wrote this account.
+    // UPGRADE RULE: when adding new fields in a future version —
+    //   1. Append them ABOVE this comment, never below or in the middle.
+    //   2. schema_version must always remain the last field in the struct.
+    //   3. Increase GHOST_ACCOUNT_SPACE by the new field's byte size.
+    //   4. Add a SCHEMA_VERSION_VXX constant and update CURRENT_SCHEMA_VERSION.
+    // Frontend reads this field to gate new features via isVersionSufficient().
+    pub schema_version: u8,                      // 1 — v1.8+
 }
 
 #[derive(Accounts)]
 pub struct InitializeGhost<'info> {
+    // space = GHOST_ACCOUNT_SPACE (1221 for v1.8) — update this when GHOST_ACCOUNT_SPACE grows
     #[account(init, payer = signer, space = GHOST_ACCOUNT_SPACE, seeds = [GHOST_SEED, signer.key().as_ref()], bump)]
     pub ghost: Box<Account<'info, GhostAccount>>,
     /// CHECK: Vault PDA — bump derivation only
@@ -885,4 +937,5 @@ pub enum GhostError {
     #[msg("Beneficiary action is not Transfer (action must be 0).")] NotATransferBeneficiary,
     #[msg("Wrong token mint — does not match beneficiary.token_mint.")] WrongMint,
     #[msg("Account size invalid for this operation. Expected v1.7 layout (1220 bytes).")] InvalidAccountSize,
+    #[msg("Account is already on the latest schema version.")] AlreadyMigrated,
 }
