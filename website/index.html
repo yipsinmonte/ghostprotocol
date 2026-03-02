@@ -7997,7 +7997,7 @@ async function dbUpdateInterval() {
     showNotif('✅ Interval updated + heartbeat sent: ' + formatIntervalLabel(seconds), 'green');
     // Re-fetch from chain — lastHeartbeat now = this tx time, deadline = now + new interval
     await fetchGhostAccount();
-    syncSettingsDisplay(); updateCountdown();
+    updateDashboardUI(); syncSettingsDisplay(); updateCountdown();
   } catch(err) { showNotif('Failed: ' + (err.message || err), 'error'); }
 }
 
@@ -8063,7 +8063,7 @@ async function dbUpdateGrace() {
     showNotif('✅ Grace period updated + heartbeat sent: ' + label, 'green');
     // Re-fetch from chain so gracePeriodSeconds is authoritative
     await fetchGhostAccount();
-    syncSettingsDisplay();
+    updateDashboardUI(); syncSettingsDisplay();
   } catch(err) { showNotif('Failed: ' + (err.message || err), 'error'); }
 }
 
