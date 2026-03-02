@@ -3369,6 +3369,24 @@ function updateDashboardUI() {
   const alert = document.getElementById('dbAwakeningAlert');
   if (alert) alert.style.display = g.status === 'awakened' ? 'block' : 'none';
 
+  // Update grace period countdown
+  const graceCountdownEl = document.getElementById('dbGraceCountdown');
+  if (graceCountdownEl && g.status === 'awakened' && g.awakenedAt && g.gracePeriodSeconds != null) {
+    const graceEndMs = g.awakenedAt + (g.gracePeriodSeconds * 1000); // awakenedAt is stored in ms
+    const remainMs = graceEndMs - Date.now();
+    if (remainMs <= 0) {
+      graceCountdownEl.textContent = 'Expired';
+    } else {
+      const totalSecs = Math.floor(remainMs / 1000);
+      const d = Math.floor(totalSecs / 86400);
+      const h = Math.floor((totalSecs % 86400) / 3600);
+      const m = Math.floor((totalSecs % 3600) / 60);
+      graceCountdownEl.textContent = d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+    }
+  } else if (graceCountdownEl && g.gracePeriodSeconds === 0) {
+    graceCountdownEl.textContent = 'Instant (0s)';
+  }
+
   updateCountdown();
   syncSettingsDisplay();
   updateWalletIdentity();
