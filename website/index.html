@@ -3995,11 +3995,11 @@ function dbShowPage(pageId, navEl) {
     renderWholeVaultShares();
     loadWalletTokens(); // async — also calls populateAllPickers when done
   }
-  if (pageId === 'vault') loadWalletTokens();
   if (pageId === 'settings') syncSettingsDisplay();
   if (pageId === 'recovery') renderRecoveryWallets();
   if (pageId === 'heartbeat') renderPingHistory();
   if (pageId === 'overview') { renderVaultOverview(); renderPingHistory(); renderActivityLog(); renderBeneficiaries(); }
+  if (pageId === 'vault') { loadWalletTokens().then(() => { renderVaultHoldings(); renderVaultOverview(); }).catch(() => {}); }
 }
 
 // ─── Countdown ─────────────────────────────────────────────────
@@ -4595,26 +4595,27 @@ async function dbAddBeneficiary(action) {
       return !(shortMatch || fullMatch);
     });
     const mergedCount = beforeCount - ghostState.ghost.beneficiaries.length;
-    // Stage locally first so UI reflects immediately
-    if (!ghostState.ghost.wholeVaultShares) ghostState.ghost.wholeVaultShares = [];
     const _wvAction = isWholeBurn ? 1 : 0;
-    ghostState.ghost.wholeVaultAction = _wvAction;
-    ghostState.ghost.wholeVaultShares = [{ addr: short, fullAddr: isWholeBurn ? null : recipient, pct: 100, action: _wvAction }];
-    ghostState.ghost.beneficiaries.push({
-      recipient: short, fullAddr: isWholeBurn ? null : recipient,
-      sharePct: 100, amount: 0,
-      token: isWholeBurn ? '🔥 Burn entire vault' : '👻 100% of vault',
-      action: 'whole-vault-share', wholeVaultAction: _wvAction, executed: false
-    });
-    if (!isWholeBurn) document.getElementById('newRecipient').value = '';
-    _refreshBenePickers();
-    renderBeneficiaries();
-    saveSession();
     const mergeNote = mergedCount > 0 ? ' · merged ' + mergedCount + ' existing entr' + (mergedCount === 1 ? 'y' : 'ies') : '';
-    const wvLabel = isWholeBurn ? '🔥 Whole vault burn staged' : ('👻 Staged → ' + short + mergeNote);
-    showNotif(wvLabel + '. Sending on-chain...', 'green');
-    // Fire on-chain tx immediately — no second popup
-    await dbSaveWholeVaultPlan(isWholeBurn ? 1 : 0);
+    showNotif((isWholeBurn ? '🔥 Sending burn instruction' : ('👻 Assigning vault → ' + short + mergeNote)) + '...', '');
+    // Fire on-chain tx first — only update UI after it confirms
+    const _wvOk = await dbSaveWholeVaultPlan(isWholeBurn ? 1 : 0);
+    if (_wvOk !== false) {
+      // On-chain confirmed — now update local state
+      if (!ghostState.ghost.wholeVaultShares) ghostState.ghost.wholeVaultShares = [];
+      ghostState.ghost.wholeVaultAction = _wvAction;
+      ghostState.ghost.wholeVaultShares = [{ addr: short, fullAddr: isWholeBurn ? null : recipient, pct: 100, action: _wvAction }];
+      ghostState.ghost.beneficiaries.push({
+        recipient: short, fullAddr: isWholeBurn ? null : recipient,
+        sharePct: 100, amount: 0,
+        token: isWholeBurn ? '🔥 Burn entire vault' : '👻 100% of vault',
+        action: 'whole-vault-share', wholeVaultAction: _wvAction, executed: false
+      });
+      if (!isWholeBurn) document.getElementById('newRecipient').value = '';
+      _refreshBenePickers();
+      renderBeneficiaries();
+      saveSession();
+    }
     return;
   }
 
@@ -6961,16 +6962,14 @@ const solTokens = tokens.filter(t => t.mint === 'native');
 const splTokens = tokens.filter(t => t.mint !== 'native' && t.mint !== GHOST_MINT);
 let successCount = 0;
 showNotif('Preparing deposit of ' + tokens.length + ' asset(s)...', '');
+// Collect all setup instructions to bundle into deposit txs — no separate signing rounds
 const vaultPdaInfo = await connection.getAccountInfo(vaultPda);
+const _setupIxs = []; // prepend to first batch tx
+const _setupKps = []; // keypairs that need to partialSign
 if (!vaultPdaInfo || vaultPdaInfo.lamports === 0) {
-showNotif('Activating vault...', '');
-const minRent = await connection.getMinimumBalanceForRentExemption(0);
-const { blockhash: fundBh } = await connection.getLatestBlockhash();
-const fundTx = new Transaction({ recentBlockhash: fundBh, feePayer: walletPk });
-fundTx.add(SystemProgram.transfer({ fromPubkey: walletPk, toPubkey: vaultPda, lamports: minRent }));
-const fundSigned = await ghostState.provider.signTransaction(fundTx);
-const fundSig = await connection.sendRawTransaction(fundSigned.serialize(), { skipPreflight: true });
-await connection.confirmTransaction(fundSig, 'confirmed');
+  showNotif('Preparing vault activation + deposit...', '');
+  const minRent = await connection.getMinimumBalanceForRentExemption(0);
+  _setupIxs.push(SystemProgram.transfer({ fromPubkey: walletPk, toPubkey: vaultPda, lamports: minRent }));
 }
 const splMeta = await Promise.all(splTokens.map(async t => {
 const mintPk = new PublicKey(effectiveMint(t.mint));
@@ -6987,25 +6986,27 @@ try { const ex = await connection.getTokenAccountsByOwner(vaultPda, { mint: mint
 if (!vaultAta) vaultAta = await findATAWithProg(vaultPda, mintPk, tokenProgPk);
 const vaultAtaInfo = await connection.getAccountInfo(vaultAta);
 let createdVaultAta = vaultAta;
+const _ataIxs = [];
 if (!vaultAtaInfo) {
-const { createIx, initIx, kp } = await buildManualTokenAccountIxs(walletPk, mintPk, vaultPda, rawTokenProgPk, connection);
-const { blockhash: initBh } = await connection.getLatestBlockhash();
-const initTx = new Transaction({ recentBlockhash: initBh, feePayer: walletPk });
-initTx.add(createIx, initIx);
-const initWalletSigned = await ghostState.provider.signTransaction(initTx);
-initWalletSigned.partialSign(kp);
-const initSig = await connection.sendRawTransaction(initWalletSigned.serialize(), { skipPreflight: true });
-await connection.confirmTransaction(initSig, 'confirmed');
-createdVaultAta = kp.publicKey;
+  const { createIx, initIx, kp } = await buildManualTokenAccountIxs(walletPk, mintPk, vaultPda, rawTokenProgPk, connection);
+  _ataIxs.push(createIx, initIx);
+  _setupKps.push(kp);
+  createdVaultAta = kp.publicKey;
 }
-return { t, mintPk, rawTokenProgPk, ownerAta, vaultAta: createdVaultAta };
+return { t, mintPk, rawTokenProgPk, ownerAta, vaultAta: createdVaultAta, _ataIxs };
 }));
 const BATCH_SIZE = 3;
+let _firstBatch = true;
 for (let i = 0; i < splMeta.length; i += BATCH_SIZE) {
 const batch = splMeta.slice(i, i + BATCH_SIZE);
 try {
 const { blockhash } = await connection.getLatestBlockhash();
 const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
+// First batch: prepend vault activation + vault ATA creation instructions
+if (_firstBatch) { _setupIxs.forEach(ix => tx.add(ix)); _firstBatch = false; }
+// Each token in batch: prepend its ATA creation ixs if needed
+for (const { t, mintPk, rawTokenProgPk, ownerAta, vaultAta, _ataIxs } of batch) {
+  _ataIxs.forEach(ix => tx.add(ix)); }
 for (const { t, mintPk, rawTokenProgPk, ownerAta, vaultAta } of batch) {
 const amountRaw = BigInt(Math.round(t.balance * Math.pow(10, t.decimals)));
 const buf = new ArrayBuffer(8); new DataView(buf).setBigUint64(0, amountRaw, true);
@@ -7021,6 +7022,8 @@ tx.add(new TransactionInstruction({ programId, keys: [
 }
 showNotif('Sign to deposit: ' + batch.map(m => m.t.symbol).join(', ') + '...', '');
 const signed = await ghostState.provider.signTransaction(tx);
+// partialSign with any ATA keypairs collected above
+if (_setupKps.length) { for (const kp of _setupKps) signed.partialSign(kp); }
 let sig;
 try { sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' }); }
 catch(simErr) {
@@ -7048,45 +7051,44 @@ for (const t of solTokens) {
 try {
 const amount = t.balance;
 const lamports = Math.round(amount * 1e9);
-const { instructions: wrapIxs, wsolAta, kp: wsolKp } = await buildWrapSOLInstructions(walletPk, lamports, connection);
-showNotif('Sign to wrap SOL...', '');
-const { blockhash: wrapBh } = await connection.getLatestBlockhash();
-const wrapTx = new Transaction({ recentBlockhash: wrapBh, feePayer: walletPk });
-wrapIxs.forEach(ix => wrapTx.add(ix));
-const wrapSigned = await ghostState.provider.signTransaction(wrapTx);
-if (wsolKp) wrapSigned.partialSign(wsolKp);
-const wrapSig = await connection.sendRawTransaction(wrapSigned.serialize(), { skipPreflight: true });
-await connection.confirmTransaction(wrapSig, 'confirmed');
+showNotif('Preparing SOL deposit...', '');
+// Pre-fetch vault wSOL ATA existence so we know what instructions to include
 let vaultWsolAta;
 try { const ex = await connection.getTokenAccountsByOwner(vaultPda, { mint: WSOL_MINT_PK }); if (ex.value.length > 0) vaultWsolAta = ex.value[0].pubkey; } catch(e) {}
 if (!vaultWsolAta) vaultWsolAta = await findATAWithProg(vaultPda, WSOL_MINT_PK, TOKEN_PROG_PK);
 const vaultWsolInfo = await connection.getAccountInfo(vaultWsolAta);
+// Build all instructions for one combined tx: wrap + (create vault ATA if needed) + deposit
+const { instructions: wrapIxs, wsolAta, kp: wsolKp } = await buildWrapSOLInstructions(walletPk, lamports, connection);
+const combinedTx = new Transaction({ feePayer: walletPk });
+const signers = [];
+if (wsolKp) signers.push(wsolKp);
+// 1. Wrap SOL instructions (createAccount+initAccount or transfer+syncNative)
+wrapIxs.forEach(ix => combinedTx.add(ix));
+// 2. Create vault wSOL ATA if it doesn't exist yet
+let resolvedVaultWsolAta = vaultWsolAta;
 if (!vaultWsolInfo) {
-const { createIx, initIx, kp: vaultKp } = await buildManualTokenAccountIxs(walletPk, WSOL_MINT_PK, vaultPda, TOKEN_PROG_PK, connection);
-const { blockhash: initBh } = await connection.getLatestBlockhash();
-const initTx = new Transaction({ recentBlockhash: initBh, feePayer: walletPk });
-initTx.add(createIx, initIx);
-const initSigned = await ghostState.provider.signTransaction(initTx);
-initSigned.partialSign(vaultKp);
-const initSig = await connection.sendRawTransaction(initSigned.serialize(), { skipPreflight: true });
-await connection.confirmTransaction(initSig, 'confirmed');
-vaultWsolAta = vaultKp.publicKey;
+  const { createIx, initIx, kp: vaultKp } = await buildManualTokenAccountIxs(walletPk, WSOL_MINT_PK, vaultPda, TOKEN_PROG_PK, connection);
+  combinedTx.add(createIx, initIx);
+  signers.push(vaultKp);
+  resolvedVaultWsolAta = vaultKp.publicKey;
 }
+// 3. Deposit instruction
 const amountRaw = BigInt(lamports);
 const buf = new ArrayBuffer(8); new DataView(buf).setBigUint64(0, amountRaw, true);
 const data = new Uint8Array(16); data.set(depositDisc, 0); data.set(new Uint8Array(buf), 8);
-const { blockhash: depBh } = await connection.getLatestBlockhash();
-const depTx = new Transaction({ recentBlockhash: depBh, feePayer: walletPk });
-depTx.add(new TransactionInstruction({ programId, keys: [
-{ pubkey: ghostPda,     isSigner: false, isWritable: false },
-{ pubkey: walletPk,     isSigner: true,  isWritable: true  },
-{ pubkey: WSOL_MINT_PK, isSigner: false, isWritable: false },
-{ pubkey: wsolAta,      isSigner: false, isWritable: true  },
-{ pubkey: vaultWsolAta, isSigner: false, isWritable: true  },
-{ pubkey: TOKEN_PROG_PK,isSigner: false, isWritable: false },
+combinedTx.add(new TransactionInstruction({ programId, keys: [
+{ pubkey: ghostPda,            isSigner: false, isWritable: false },
+{ pubkey: walletPk,            isSigner: true,  isWritable: true  },
+{ pubkey: WSOL_MINT_PK,        isSigner: false, isWritable: false },
+{ pubkey: wsolAta,             isSigner: false, isWritable: true  },
+{ pubkey: resolvedVaultWsolAta,isSigner: false, isWritable: true  },
+{ pubkey: TOKEN_PROG_PK,       isSigner: false, isWritable: false },
 ], data }));
+const { blockhash: depBh } = await connection.getLatestBlockhash();
+combinedTx.recentBlockhash = depBh;
 showNotif('Sign to deposit SOL to vault...', '');
-const depSigned = await ghostState.provider.signTransaction(depTx);
+const depSigned = await ghostState.provider.signTransaction(combinedTx);
+for (const kp of signers) depSigned.partialSign(kp);
 const depSig = await connection.sendRawTransaction(depSigned.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' });
 const conf = await connection.confirmTransaction(depSig, 'confirmed');
 if (conf.value?.err) throw new Error('TX failed: ' + JSON.stringify(conf.value.err));
@@ -7098,11 +7100,16 @@ successCount++;
 } catch(err) { console.error('SOL deposit error:', err); showNotif('SOL deposit failed: ' + (err.message || err), 'error'); }
 }
 if (successCount > 0) {
-const depositPool = ghostState.walletTokens.filter(tok => tok.balance > 0 && !isProtocolMint(tok.mint));
-buildPickerDropdown('deposit', depositPool);
 ghostState.selectedTokens.deposit = null;
-renderVaultHoldings(); renderVaultOverview(); _refreshBenePickers();
+renderVaultHoldings(); renderVaultOverview();
 showNotif('Deposited ' + successCount + '/' + tokens.length + ' asset(s) to vault!', 'green');
+// Reload wallet + vault tokens from chain so pickers and beneficiary tab reflect new state
+loadWalletTokens().then(() => {
+  const depositPool = ghostState.walletTokens.filter(tok => tok.balance > 0 && !isProtocolMint(tok.mint));
+  buildPickerDropdown('deposit', depositPool);
+  _refreshBenePickers();
+  renderVaultHoldings(); renderVaultOverview(); renderBeneficiaries();
+}).catch(() => {});
 saveSession(); loadWalletTokens().catch(()=>{});
 }
 }
