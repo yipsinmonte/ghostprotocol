@@ -1664,36 +1664,33 @@ const RPC_URL = 'https://mainnet.helius-rpc.com/?api-key=5a9a7cb2-8ee9-4656-bd60
 // ── On-chain ghost count + avg heartbeat ─────────────────────────
 async function fetchGhostCount() {
   try {
-    const res = await fetch(RPC_URL, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        jsonrpc: '2.0', id: 1, method: 'getProgramAccounts',
-        params: [PROGRAM_ID, {
-          encoding: 'base64',
-          commitment: 'confirmed',
-          filters: [{ dataSize: 1220 }]
-        }]
-      })
-    });
-    // Also fetch v1.8 accounts (1221 bytes)
-    const res18 = await fetch(RPC_URL, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        jsonrpc: '2.0', id: 2, method: 'getProgramAccounts',
-        params: [PROGRAM_ID, {
-          encoding: 'base64',
-          commitment: 'confirmed',
-          filters: [{ dataSize: 1221 }]
-        }]
-      })
-    });
-    const data = await res.json();
-    const data18 = await res18.json();
+    // Fetch both v1.7 (1220) and v1.8 (1221) accounts
+    // Use dataSlice:{offset:0,length:160} to get just enough bytes for interval parsing
+    // without transferring full 1220-byte account data (Helius may block full gPA)
+    const fetchSize = async (size) => {
+      try {
+        const r = await fetch(RPC_URL, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            jsonrpc: '2.0', id: size, method: 'getProgramAccounts',
+            params: [PROGRAM_ID, {
+              encoding: 'base64',
+              commitment: 'confirmed',
+              dataSlice: { offset: 0, length: 160 }, // enough for header + interval field
+              filters: [{ dataSize: size }]
+            }]
+          })
+        });
+        const d = await r.json();
+        return d?.result ?? [];
+      } catch(e) { return []; }
+    };
+
+    const [accts17, accts18] = await Promise.all([fetchSize(1220), fetchSize(1221)]);
     const seen = new Set();
     const accounts = [];
-    for (const a of [...(data?.result ?? []), ...(data18?.result ?? [])]) {
+    for (const a of [...accts17, ...accts18]) {
       if (!seen.has(a.pubkey)) { seen.add(a.pubkey); accounts.push(a); }
     }
     const count = accounts.length;
@@ -1702,38 +1699,42 @@ async function fetchGhostCount() {
       if (el) el.textContent = count.toLocaleString();
       console.log('[Ghost] On-chain ghost count:', count);
     }
-    // ── Parse interval dynamically (recovery_wallets is variable-length) ──
+
+    // ── Parse interval from sliced data ──────────────────────────
     let totalDays = 0, validCount = 0;
     for (const acct of accounts) {
       try {
         const raw = atob(acct.account.data[0]);
         const bytes = new Uint8Array(raw.length);
         for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-        if (bytes.length < 1220) continue; // skip pre-v1.7 accounts
+        if (bytes.length < 80) continue; // need at least enough bytes to reach interval
         const view = new DataView(bytes.buffer);
-        let o = 8; // skip discriminator
-        o += 32;   // owner: Pubkey
-        // recovery_wallets: [Option<Pubkey>; 3] — variable length
+        let o = 8;  // skip discriminator
+        o += 32;    // owner
+        // recovery_wallets: [Option<Pubkey>; 3] — variable
         for (let r = 0; r < 3; r++) {
+          if (o >= bytes.length) break;
           const tag = bytes[o]; o += 1;
-          if (tag === 1) o += 32; // Some(Pubkey)
+          if (tag === 1) o += 32;
         }
-        // last_heartbeat: i64
-        o += 8;
-        // interval_seconds: i64
+        o += 8; // last_heartbeat
+        if (o + 8 > bytes.length) continue;
         const intervalSec = Number(view.getBigInt64(o, true));
         const days = intervalSec / 86400;
-        console.log('[Ghost] Account interval:', days, 'days (raw sec:', intervalSec, ')');
         if (days >= 1 && days <= 36500) { totalDays += days; validCount++; }
-      } catch(e) { console.log('[Ghost] interval parse err:', e); }
+      } catch(e) {}
     }
+
     if (validCount > 0) {
       const avgDays = Math.round(totalDays / validCount);
       const el = document.getElementById('avgHeartbeat');
       if (el) el.textContent = avgDays + 'd';
       console.log('[Ghost] Avg heartbeat:', avgDays, 'days from', validCount, 'accounts');
-    } else {
-      console.log('[Ghost] No valid intervals found from', accounts.length, 'accounts');
+    } else if (ghostState.ghost?.intervalSeconds > 0) {
+      // Fallback: show connected user's own interval if gPA returned no parseable data
+      const days = Math.round(ghostState.ghost.intervalSeconds / 86400);
+      const el = document.getElementById('avgHeartbeat');
+      if (el && days >= 1) el.textContent = days + 'd';
     }
   } catch(e) { console.log('[Ghost] ghostCount fetch failed', e); }
 }
@@ -3883,6 +3884,8 @@ async function initializeGhost() {
   }
 }
 function openDashboard() {
+  ghostState._wasInDashboard = true;
+  saveSession();
   if (!ghostState.connected) { openModal(); return; }
   document.getElementById('dashboardPanel').classList.add('open');
   document.body.style.overflow = 'hidden';
@@ -3999,11 +4002,19 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    openDashboard();
-    // Always land on overview when connecting/reconnecting — never restore last page on fresh load
-    const _status = ghostState.ghost.status;
-    dbShowPage('overview', document.getElementById('nav-overview'));
-    loadWalletTokens();
+    // Only open dashboard if user was already inside it (not on landing page)
+    // Check if the main landing/marketing content is visible — if so, stay there
+    const _dashVisible = document.getElementById('dashboard')?.style.display !== 'none' &&
+                         document.getElementById('dashboard')?.style.display !== '';
+    const _landingVisible = document.getElementById('landing')?.style.display !== 'none' ||
+                            !_dashVisible;
+    // If page was refreshed while on landing, don't auto-redirect to dashboard
+    const _wasInDashboard = ghostState._wasInDashboard === true;
+    if (_wasInDashboard) {
+      openDashboard();
+      dbShowPage('overview', document.getElementById('nav-overview'));
+      loadWalletTokens();
+    }
   }, 100);
 });
 
@@ -6791,9 +6802,19 @@ async function dbMigrateAccount() {
     // Re-enable any UI elements greyed out due to version gating
     enableAllVersionGatedFeatures();
 
-    // Re-fetch from chain and refresh UI
-    await fetchGhostAccount(ghostState.publicKey);
-    updateDashboardUI();
+    // Re-fetch from chain — use delay to avoid RPC staleness returning old 1220-byte data
+    setTimeout(async () => {
+      await fetchGhostAccount(ghostState.publicKey).catch(() => {});
+      // Force _needsMigration = false regardless of what RPC returned
+      // (the on-chain tx confirmed so it IS migrated — RPC may lag)
+      ghostState.ghost._needsMigration = false;
+      ghostState.ghost._schemaVersion = 18;
+      const _b = document.getElementById('overviewMigrationBanner');
+      if (_b) _b.style.display = 'none';
+      const _c = document.getElementById('migrationCard');
+      if (_c) _c.style.display = 'none';
+      updateDashboardUI();
+    }, 3000);
   } catch(err) {
     console.error('[Ghost] Migration error:', err);
     showNotif('Migration failed: ' + (err.message || err), 'error');
