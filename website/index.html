@@ -10,7 +10,7 @@
   :root {
     --black: #030305; --deep: #07070f; --ghost: #0d0d1a; --dim: #11111f;
     --accent: #7744ff; --accent2: #4422cc; --glow: #9966ff;
-    --pulse: #ff3366; --text: #e0e0ec; --muted: #9090a8; --white: #f0f0f8;
+    --pulse: #00ff88; --text: #e0e0ec; --muted: #9090a8; --white: #f0f0f8;
     --sol: #9945ff; --green: #33ff99; --amber: #ffb830; --red: #ff3d5a;
     --card: #0a0a18; --border: rgba(102,51,255,0.12);
   }
@@ -21,7 +21,7 @@
   body::after { content: ''; position: fixed; inset: 0; background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px); pointer-events: none; z-index: 998; }
 
   /* ─── NAV ─────────────────────────────────────────────── */
-  nav { position: fixed; top: 0; width: 100%; padding: 20px 48px; display: flex; justify-content: space-between; align-items: center; z-index: 100; background: linear-gradient(to bottom, rgba(3,3,5,0.97), transparent); border-bottom: 1px solid rgba(102,51,255,0.08); }
+  nav { position: fixed; top: 0; width: 100%; padding: 20px 48px; display: flex; justify-content: space-between; align-items: center; z-index: 100; background: linear-gradient(to bottom, rgba(3,3,5,0.97), transparent); border-bottom: 1px solid rgba(255,255,255,0.04); }
   .nav-logo { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 20px; letter-spacing: 0.3em; color: var(--white); text-decoration: none; }
   .nav-logo span { color: var(--accent); }
   .nav-links { display: flex; gap: 36px; list-style: none; align-items: center; }
@@ -44,7 +44,7 @@
   .wallet-btn.connected::before { background: var(--green); }
 
   /* ─── CONTRACT BANNER ─────────────────────────────────── */
-  .contract-banner { background: rgba(102,51,255,0.06); border-bottom: 1px solid rgba(102,51,255,0.12); padding: 10px 48px; display: flex; justify-content: center; align-items: center; gap: 16px; margin-top: 73px; font-family: 'Share Tech Mono', monospace; font-size: 13px; }
+  .contract-banner { background: rgba(255,255,255,0.02); border-bottom: 1px solid rgba(255,255,255,0.05); padding: 10px 48px; display: flex; justify-content: center; align-items: center; gap: 16px; margin-top: 73px; font-family: 'Share Tech Mono', monospace; font-size: 13px; }
   .contract-banner .label { color: var(--muted); letter-spacing: 0.2em; text-transform: uppercase; }
   .contract-addr { color: var(--accent); letter-spacing: 0.1em; }
   .copy-btn { background: none; border: 1px solid rgba(102,51,255,0.3); color: var(--muted); font-family: 'Share Tech Mono', monospace; font-size: 12px; padding: 3px 10px; cursor: pointer; letter-spacing: 0.15em; transition: all 0.2s; }
@@ -54,25 +54,45 @@
   /* ─── HERO ────────────────────────────────────────────── */
   .hero { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 100px 40px 80px; position: relative; overflow: hidden; }
   .hero-bg { position: absolute; inset: 0; background: radial-gradient(ellipse 60% 50% at 50% 60%, rgba(102,51,255,0.08) 0%, transparent 70%), radial-gradient(ellipse 30% 30% at 20% 20%, rgba(51,17,170,0.05) 0%, transparent 60%); pointer-events: none; }
+  .hero-scanline { position: absolute; inset: 0; pointer-events: none; z-index: 1; overflow: hidden; }
+  .hero-scanline::after { content: ''; position: absolute; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent 0%, rgba(119,68,255,0.15) 20%, rgba(153,102,255,0.3) 50%, rgba(119,68,255,0.15) 80%, transparent 100%); animation: scanline-sweep 8s ease-in-out infinite; box-shadow: 0 0 20px rgba(119,68,255,0.4); }
+  @keyframes scanline-sweep { 0% { top: -2px; opacity: 0; } 5% { opacity: 1; } 90% { opacity: 0.6; } 100% { top: 100%; opacity: 0; } }
   .hero-grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(102,51,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(102,51,255,0.04) 1px, transparent 1px); background-size: 60px 60px; mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 0%, transparent 100%); pointer-events: none; }
-  .heartbeat-ring { position: absolute; width: 600px; height: 600px; border-radius: 50%; border: 1px solid rgba(102,51,255,0.1); top: 50%; left: 50%; transform: translate(-50%, -50%); animation: ring-pulse 4s ease-in-out infinite; pointer-events: none; }
-  .heartbeat-ring:nth-child(2) { width: 800px; height: 800px; animation-delay: 1s; opacity: 0.6; }
-  .heartbeat-ring:nth-child(3) { width: 1000px; height: 1000px; animation-delay: 2s; opacity: 0.3; }
-  @keyframes ring-pulse { 0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.2; } 50% { transform: translate(-50%, -50%) scale(1.05); opacity: 0.5; } }
+  .heartbeat-ring { position: absolute; border-radius: 50%; border: 1px solid rgba(153,102,255,0.15); top: 50%; left: 50%; transform: translate(-50%,-50%) scale(0.8); opacity: 0; pointer-events: none; animation: ring-expand 4s cubic-bezier(0.2,0,0.8,1) infinite; }
+  .heartbeat-ring:nth-child(2) { animation-delay: 1.33s; }
+  .heartbeat-ring:nth-child(3) { animation-delay: 2.66s; }
+  @keyframes ring-expand {
+    0%   { width: 300px; height: 300px; opacity: 0; transform: translate(-50%,-50%) scale(1); }
+    10%  { opacity: 0.5; }
+    100% { width: 1100px; height: 1100px; opacity: 0; transform: translate(-50%,-50%) scale(1); }
+  }
   .hero-logo { width: 120px; height: 120px; margin-bottom: 32px; animation: fade-up 1s ease both; filter: drop-shadow(0 0 30px rgba(102,51,255,0.5)); }
-  .hero-eyebrow { font-family: 'Share Tech Mono', monospace; font-size: 13px; letter-spacing: 0.4em; color: var(--accent); text-transform: uppercase; margin-bottom: 24px; animation: fade-up 1s ease 0.1s both; }
+  .hero-eyebrow { font-family: 'Share Tech Mono', monospace; font-size: 13px; letter-spacing: 0.4em; color: var(--muted); text-transform: uppercase; margin-bottom: 24px; animation: fade-up 1s ease 0.1s both; }
   .hero-eyebrow::before { content: '◈ '; }
   .hero-eyebrow::after { content: ' ◈'; }
   .hero-title { font-family: 'Syne', sans-serif; font-weight: 800; font-size: clamp(72px, 15vw, 160px); letter-spacing: -0.02em; line-height: 0.9; color: var(--white); margin-bottom: 8px; animation: fade-up 1s ease 0.2s both; position: relative; }
   .hero-title::after { content: 'GHOST'; position: absolute; inset: 0; color: transparent; -webkit-text-stroke: 1px rgba(102,51,255,0.3); transform: translate(3px, 3px); z-index: -1; }
-  .hero-ticker { font-family: 'Share Tech Mono', monospace; font-size: 18px; letter-spacing: 0.3em; color: var(--accent); margin-bottom: 32px; animation: fade-up 1s ease 0.25s both; }
+  .hero-ticker { font-family: 'Share Tech Mono', monospace; font-size: 18px; letter-spacing: 0.3em; color: rgba(255,255,255,0.5); margin-bottom: 32px; animation: fade-up 1s ease 0.25s both; }
   .hero-sub { font-size: clamp(18px, 2.5vw, 24px); font-weight: 400; color: var(--text); max-width: 540px; margin: 0 auto 48px; animation: fade-up 1s ease 0.3s both; line-height: 1.5; }
-  .hero-actions { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; animation: fade-up 1s ease 0.4s both; margin-bottom: 64px; position: relative; z-index: 10; }
-  .btn-pump { font-family: 'Share Tech Mono', monospace; font-size: 14px; letter-spacing: 0.2em; text-transform: uppercase; padding: 16px 36px; background: var(--accent); color: var(--white); text-decoration: none; transition: all 0.3s; display: flex; align-items: center; gap: 10px; }
-  .btn-pump:hover { background: var(--glow); box-shadow: 0 0 40px rgba(136,85,255,0.5); }
-  .btn-pump .pump-icon { font-size: 16px; }
+  .hero-actions { display: flex; flex-direction: column; align-items: center; gap: 20px; animation: fade-up 1s ease 0.4s both; margin-bottom: 64px; position: relative; z-index: 10; }
+  /* legacy btn-pump kept for any remaining uses */
+  .btn-pump { font-family: 'Share Tech Mono', monospace; font-size: 13px; letter-spacing: 0.2em; text-transform: uppercase; padding: 12px 28px; background: transparent; border: 1px solid rgba(119,68,255,0.35); color: var(--muted); text-decoration: none; transition: all 0.3s; display: flex; align-items: center; gap: 10px; }
+  .btn-pump:hover { border-color: rgba(119,68,255,0.6); color: var(--text); }
+  .btn-pump .pump-icon { font-size: 14px; }
   .btn-secondary { font-family: 'Share Tech Mono', monospace; font-size: 14px; letter-spacing: 0.2em; text-transform: uppercase; padding: 16px 36px; border: 1px solid var(--muted); color: var(--muted); text-decoration: none; transition: all 0.3s; cursor: pointer; background: transparent; }
   .btn-secondary:hover { border-color: var(--text); color: var(--text); }
+  /* PRIMARY: Register Heartbeat */
+  .btn-register { position: relative; font-family: 'Share Tech Mono', monospace; font-size: 15px; letter-spacing: 0.25em; text-transform: uppercase; padding: 22px 56px; background: linear-gradient(135deg, #c0003a 0%, #8b0000 50%, #c0003a 100%); background-size: 200% 100%; border: none; color: #fff; cursor: pointer; transition: all 0.4s; display: inline-flex; align-items: center; gap: 14px; overflow: hidden; box-shadow: 0 0 40px rgba(192,0,58,0.35), 0 0 80px rgba(192,0,58,0.15), inset 0 1px 0 rgba(255,255,255,0.1); clip-path: polygon(12px 0%, 100% 0%, calc(100% - 12px) 100%, 0% 100%); }
+  .btn-register::before { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, transparent 60%); pointer-events: none; }
+  .btn-register:hover { background-position: 100% 0; box-shadow: 0 0 60px rgba(220,0,60,0.55), 0 0 120px rgba(192,0,58,0.25), inset 0 1px 0 rgba(255,255,255,0.15); transform: translateY(-2px); letter-spacing: 0.3em; }
+  .btn-register:active { transform: translateY(0); }
+  .btn-register-pulse { width: 8px; height: 8px; border-radius: 50%; background: #ff6688; box-shadow: 0 0 12px #ff3366; animation: reg-pulse 1.4s ease-in-out infinite; flex-shrink: 0; }
+  .btn-register-icon { font-size: 16px; }
+  @keyframes reg-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.6)} }
+  /* SECONDARY links */
+  .hero-secondary-btns { display: flex; gap: 32px; align-items: center; justify-content: center; }
+  .btn-ghost-link { font-family: 'Share Tech Mono', monospace; font-size: 11px; letter-spacing: 0.25em; text-transform: uppercase; color: rgba(255,255,255,0.3); text-decoration: none; transition: color 0.2s; padding-bottom: 2px; border-bottom: 1px solid transparent; }
+  .btn-ghost-link:hover { color: rgba(255,255,255,0.6); border-bottom-color: rgba(255,255,255,0.2); }
   .btn-dex { font-family: 'Share Tech Mono', monospace; font-size: 14px; letter-spacing: 0.2em; text-transform: uppercase; padding: 16px 36px; border: 1px solid rgba(153,69,255,0.4); color: var(--sol); text-decoration: none; transition: all 0.3s; }
   .btn-dex:hover { border-color: var(--sol); box-shadow: 0 0 20px rgba(153,69,255,0.2); }
   .heartbeat-bar { width: 100%; max-width: 700px; margin: 0 auto; animation: fade-up 1s ease 0.5s both; }
@@ -84,12 +104,12 @@
   @keyframes hb-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 
   /* ─── STATS / TICKER ──────────────────────────────────── */
-  .stats-wrap { max-width: 900px; margin: 0 auto; }
-  .stats { display: flex; justify-content: center; border-top: 1px solid rgba(102,51,255,0.15); border-bottom: 1px solid rgba(102,51,255,0.15); }
-  .stat { flex: 1; padding: 36px 28px; text-align: center; border-right: 1px solid rgba(102,51,255,0.1); }
+  .stats-wrap { max-width: 1100px; margin: 0 auto; }
+  .stats { display: flex; justify-content: center; border: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.01); }
+  .stat { flex: 1; padding: 48px 36px; text-align: center; border-right: 1px solid rgba(255,255,255,0.05); position: relative; }
   .stat:last-child { border-right: none; }
-  .stat-value { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 28px; color: var(--white); display: block; margin-bottom: 6px; }
-  .stat-label { font-family: 'Share Tech Mono', monospace; font-size: 12px; letter-spacing: 0.25em; color: var(--muted); text-transform: uppercase; }
+  .stat-value { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 42px; color: var(--white); display: block; margin-bottom: 12px; letter-spacing: -0.02em; line-height: 1; }
+  .stat-label { font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: 0.35em; color: rgba(255,255,255,0.3); text-transform: uppercase; display: block; line-height: 1.8; }
   .price-ticker { background: rgba(153,69,255,0.05); border: 1px solid rgba(153,69,255,0.15); padding: 16px 32px; display: flex; gap: 40px; justify-content: center; align-items: center; font-family: 'Share Tech Mono', monospace; font-size: 12px; max-width: 900px; margin: 0 auto; }
   .ticker-item { display: flex; flex-direction: column; align-items: center; gap: 4px; }
   .ticker-label { font-size: 12px; letter-spacing: 0.25em; color: var(--muted); text-transform: uppercase; }
@@ -99,7 +119,7 @@
 
   /* ─── SECTIONS ────────────────────────────────────────── */
   section { padding: 100px 48px; max-width: 1200px; margin: 0 auto; }
-  .section-tag { font-family: 'Share Tech Mono', monospace; font-size: 13px; letter-spacing: 0.4em; color: var(--accent); text-transform: uppercase; margin-bottom: 24px; display: block; }
+  .section-tag { font-family: 'Share Tech Mono', monospace; font-size: 13px; letter-spacing: 0.4em; color: var(--muted); text-transform: uppercase; margin-bottom: 24px; display: block; }
   .section-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: clamp(36px, 5vw, 60px); color: var(--white); line-height: 1.1; margin-bottom: 24px; }
   .section-body { font-size: 18px; color: var(--text); max-width: 560px; line-height: 1.8; }
   .how-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 72px; align-items: start; margin-top: 72px; }
@@ -120,8 +140,8 @@
   @keyframes cursor-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
   .token-section { background: linear-gradient(to bottom, transparent, rgba(7,7,15,0.5), transparent); border-top: 1px solid rgba(102,51,255,0.1); border-bottom: 1px solid rgba(102,51,255,0.1); }
   .token-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: rgba(102,51,255,0.1); margin-top: 56px; border: 1px solid rgba(102,51,255,0.1); }
-  .token-card { background: var(--black); padding: 40px 28px; transition: background 0.3s; position: relative; overflow: hidden; }
-  .token-card:hover { background: rgba(7,7,15,0.8); }
+  .token-card { background: var(--black); border: 1px solid rgba(119,68,255,0.1); padding: 40px 28px; transition: background 0.3s, border-color 0.3s, box-shadow 0.3s; position: relative; overflow: hidden; }
+  .token-card:hover { background: rgba(7,7,15,0.8); border-color: rgba(119,68,255,0.35); box-shadow: 0 0 30px rgba(119,68,255,0.07); }
   .token-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(to right, transparent, var(--accent), transparent); opacity: 0; transition: opacity 0.3s; }
   .token-card:hover::before { opacity: 1; }
   .token-percent { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 56px; color: var(--white); line-height: 1; margin-bottom: 8px; display: block; }
@@ -134,8 +154,12 @@
   .manifesto blockquote::before { content: '"'; font-size: 180px; color: rgba(102,51,255,0.07); position: absolute; top: -60px; left: -40px; line-height: 1; }
   .manifesto-attr { font-family: 'Share Tech Mono', monospace; font-size: 14px; letter-spacing: 0.4em; color: var(--accent); text-transform: uppercase; }
   .roadmap-grid { margin-top: 56px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-  .road-card { background: rgba(7,7,15,0.6); border: 1px solid rgba(119,68,255,0.15); padding: 36px 32px; transition: border-color 0.3s; }
-  .road-card:hover { border-color: rgba(119,68,255,0.4); }
+  .road-card { background: rgba(7,7,15,0.6); border: 1px solid rgba(119,68,255,0.15); padding: 36px 32px; transition: border-color 0.3s, box-shadow 0.3s; position: relative; overflow: hidden; }
+  .road-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(119,68,255,0.6), transparent); opacity: 0; transition: opacity 0.3s; }
+  .road-card:hover { border-color: rgba(119,68,255,0.45); box-shadow: 0 0 40px rgba(119,68,255,0.08); }
+  .road-card:hover::before { opacity: 1; }
+  .road-card.active { border-color: rgba(119,68,255,0.4); box-shadow: 0 0 50px rgba(119,68,255,0.1); }
+  .road-card.active .road-badge { border-color: var(--accent); color: var(--accent); }
   .road-badge { display: inline-block; font-family: 'Share Tech Mono', monospace; font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; padding: 5px 14px; border: 1px solid rgba(119,68,255,0.3); color: var(--muted); margin-bottom: 16px; }
   .road-card h3 { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 22px; color: var(--white); margin-bottom: 6px; }
   .road-card .road-when { font-family: 'Share Tech Mono', monospace; font-size: 13px; color: var(--accent); margin-bottom: 16px; display: block; }
@@ -143,6 +167,13 @@
   .road-card li { font-family: 'Syne', sans-serif; font-size: 15px; color: var(--text); display: flex; gap: 10px; align-items: baseline; line-height: 1.5; }
   .road-card li::before { content: '→'; color: var(--accent); font-weight: 700; flex-shrink: 0; }
   .actions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 56px; }
+  .actions-present { display: flex; flex-direction: column; gap: 2px; margin-top: 56px; }
+  .action-present-item { display: grid; grid-template-columns: 56px 1fr; align-items: start; gap: 0; padding: 28px 32px; border: 1px solid rgba(119,68,255,0.12); background: rgba(7,7,20,0.5); transition: border-color 0.3s, background 0.3s; }
+  .action-present-item:hover { border-color: rgba(119,68,255,0.35); background: rgba(119,68,255,0.05); }
+  .action-present-item:not(:last-child) { border-bottom: none; }
+  .action-present-icon { font-size: 22px; padding-top: 2px; }
+  .action-present-item strong { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 17px; color: var(--white); display: block; margin-bottom: 6px; }
+  .action-present-item p { font-size: 15px; color: var(--muted); line-height: 1.7; margin: 0; }
   .action-col h3 { font-family: 'Share Tech Mono', monospace; font-size: 13px; letter-spacing: 0.3em; color: var(--accent); text-transform: uppercase; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid rgba(119,68,255,0.2); }
   .action-item { display: flex; gap: 14px; align-items: baseline; padding: 10px 0; }
   .action-icon { font-size: 18px; flex-shrink: 0; }
@@ -165,8 +196,11 @@
   .footer-logo { font-family: 'Syne', sans-serif; font-weight: 800; letter-spacing: 0.3em; color: var(--muted); font-size: 14px; }
   .footer-mono { font-family: 'Share Tech Mono', monospace; font-size: 12px; letter-spacing: 0.2em; color: #555570; text-transform: uppercase; }
   @keyframes fade-up { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
-  .reveal { opacity: 0; transform: translateY(32px); transition: opacity 0.8s ease, transform 0.8s ease; }
+  .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.7s cubic-bezier(0.16,1,0.3,1), transform 0.7s cubic-bezier(0.16,1,0.3,1); }
   .reveal.visible { opacity: 1; transform: translateY(0); }
+  .reveal:nth-child(2) { transition-delay: 0.08s; }
+  .reveal:nth-child(3) { transition-delay: 0.16s; }
+  .reveal:nth-child(4) { transition-delay: 0.24s; }
   .ghost-watermark { position: fixed; bottom: -80px; right: -80px; font-family: 'Syne', sans-serif; font-weight: 800; font-size: 300px; color: rgba(102,51,255,0.02); letter-spacing: -0.05em; pointer-events: none; z-index: 0; user-select: none; }
   .notif { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%) translateY(30px); background: #0d0d1a; border: 1px solid rgba(102,51,255,0.3); color: var(--white); font-family: 'Share Tech Mono', monospace; font-size: 14px; letter-spacing: 0.08em; padding: 16px 32px; z-index: 99999; opacity: 0; transition: all 0.35s cubic-bezier(0.34,1.56,0.64,1); pointer-events: none; white-space: nowrap; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
   .notif.show { transform: translateX(-50%) translateY(0); opacity: 1; }
@@ -625,6 +659,55 @@
     .roadmap-grid { grid-template-columns: 1fr; }
     .actions-grid { grid-template-columns: 1fr; }
   }
+
+  /* ── WOW: Glitch effect on hero title ── */
+  .hero-title { position: relative; display: inline-block; }
+  .hero-title::before, .hero-title::after {
+    content: attr(data-text); position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%; overflow: hidden; pointer-events: none;
+    font-family: inherit; font-size: inherit; font-weight: inherit; letter-spacing: inherit; color: inherit;
+  }
+  .hero-title::before {
+    color: #ff3366; z-index: -1;
+    animation: glitch-1 6s infinite;
+    clip-path: polygon(0 15%, 100% 15%, 100% 35%, 0 35%);
+  }
+  .hero-title::after {
+    color: #00ffee; z-index: -1;
+    animation: glitch-2 6s infinite;
+    clip-path: polygon(0 65%, 100% 65%, 100% 85%, 0 85%);
+  }
+  @keyframes glitch-1 {
+    0%,89%,100% { opacity:0; transform:none; }
+    90% { opacity:0.9; transform:translateX(-6px) skewX(-3deg); }
+    91% { opacity:0; transform:none; }
+    93% { opacity:0.7; transform:translateX(4px); }
+    94% { opacity:0; }
+  }
+  @keyframes glitch-2 {
+    0%,90%,100% { opacity:0; transform:none; }
+    91% { opacity:0.8; transform:translateX(6px) skewX(2deg); }
+    92% { opacity:0; transform:none; }
+    94% { opacity:0.6; transform:translateX(-3px); }
+    95% { opacity:0; }
+  }
+
+  /* ── WOW: Floating particles canvas ── */
+  #particle-canvas { position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.4; }
+
+  /* ── WOW: Stat value count-up glow ── */
+  .stat-value { display: inline-block; transition: text-shadow 0.5s; }
+  .stat-value.pulse-glow { text-shadow: 0 0 20px rgba(255,51,102,0.8), 0 0 40px rgba(255,51,102,0.4); }
+
+  /* ── WOW: Cursor trail dot ── */
+  .cursor-trail { position: fixed; width: 6px; height: 6px; border-radius: 50%; background: rgba(192,0,58,0.6); pointer-events: none; z-index: 9999; transform: translate(-50%,-50%); transition: opacity 0.6s; box-shadow: 0 0 10px rgba(192,0,58,0.4); }
+
+  /* ── WOW: Section divider — fading red line ── */
+  .section-divider { width: 60px; height: 2px; background: linear-gradient(90deg, #c0003a, transparent); margin: 0 0 48px 0; }
+
+  /* ── WOW: Noise overlay ── */
+  body::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 1; opacity: 0.025; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); background-size: 200px; }
+
 </style>
 <!-- Solana Web3.js - loaded async so it doesn't block page -->
 <script>
@@ -645,6 +728,7 @@
 </script>
 </head>
 <body>
+<canvas id="particle-canvas"></canvas>
 
 <div class="ghost-watermark">G</div>
 <div class="notif" id="notif"></div>
@@ -1296,17 +1380,12 @@
   <span class="label">Contract</span>
   <span class="contract-addr" id="contractAddr">k4MxJAdy22Dgd2UTQ9p3etbnaSLUH1q5cEfSRi6pump</span>
   <button class="copy-btn" onclick="copyContract()">COPY</button>
-  <span class="sol-badge">◎ SOLANA</span>
-  <a href="https://pump.fun/coin/k4MxJAdy22Dgd2UTQ9p3etbnaSLUH1q5cEfSRi6pump" target="_blank" style="font-family:'Share Tech Mono',monospace;font-size:12px;letter-spacing:0.2em;color:var(--accent);text-decoration:none;border:1px solid rgba(102,51,255,0.3);padding:3px 10px;">BUY ON PUMP.FUN ↗</a>
 </div>
 
 <!-- HERO -->
 <div class="hero">
   <div class="hero-bg"></div>
   <div class="hero-grid"></div>
-  <div class="heartbeat-ring"></div>
-  <div class="heartbeat-ring"></div>
-  <div class="heartbeat-ring"></div>
   <svg class="hero-logo" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
     <defs><radialGradient id="coinGrad" cx="40%" cy="35%" r="60%"><stop offset="0%" stop-color="#9966ff"/><stop offset="50%" stop-color="#6633ff"/><stop offset="100%" stop-color="#2200aa"/></radialGradient></defs>
     <circle cx="200" cy="200" r="180" fill="rgba(102,51,255,0.08)"/>
@@ -1323,14 +1402,18 @@
     <polyline points="138,205 155,205 163,205 167,188 172,222 176,196 180,214 184,205 216,205 220,205 224,190 228,220 232,197 236,210 240,205 262,205" fill="none" stroke="#ff3366" stroke-width="2" opacity="0.85" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>
   <p class="hero-eyebrow">Trustless · Solana · Digital Legacy Protocol</p>
-  <h1 class="hero-title">GHOST</h1>
+  <h1 class="hero-title" data-text="GHOST">GHOST</h1>
   <p class="hero-ticker">$GHOST</p>
   <p class="hero-sub">Miss your heartbeat.<br><em>Your ghost awakens.</em></p>
   <div class="hero-actions">
-    <a class="btn-pump" href="https://pump.fun/coin/k4MxJAdy22Dgd2UTQ9p3etbnaSLUH1q5cEfSRi6pump" target="_blank"><span class="pump-icon">👻</span> Buy on Pump.fun</a>
-    <a class="btn-dex" href="https://dexscreener.com/solana/k4MxJAdy22Dgd2UTQ9p3etbnaSLUH1q5cEfSRi6pump" target="_blank">Dexscreener ↗</a>
-    <button class="btn-secondary" onclick="ghostState.connected ? openDashboard() : openModal()">Register Heartbeat</button>
-
+    <button class="btn-register" onclick="ghostState.connected ? openDashboard() : openModal()">
+      <span class="btn-register-pulse"></span>
+      <span class="btn-register-icon">💓</span> Register Heartbeat
+    </button>
+    <div class="hero-secondary-btns">
+      <a class="btn-ghost-link" href="https://pump.fun/coin/k4MxJAdy22Dgd2UTQ9p3etbnaSLUH1q5cEfSRi6pump" target="_blank">Buy on Pump.fun ↗</a>
+      <a class="btn-ghost-link" href="https://dexscreener.com/solana/k4MxJAdy22Dgd2UTQ9p3etbnaSLUH1q5cEfSRi6pump" target="_blank">Dexscreener ↗</a>
+    </div>
   </div>
   <div class="heartbeat-bar">
     <div class="hb-label">
@@ -1339,7 +1422,12 @@
     </div>
     <div class="hb-line">
       <svg class="hb-svg" viewBox="0 0 1400 60" preserveAspectRatio="none">
-        <polyline points="0,30 100,30 120,30 130,5 140,55 150,20 160,45 170,30 300,30 400,30 420,30 430,8 440,52 450,18 460,42 470,30 600,30 700,30 720,30 730,5 740,55 750,20 760,45 770,30 900,30 1000,30 1020,30 1030,8 1040,52 1050,18 1060,42 1070,30 1200,30 1300,30 1320,30 1330,5 1340,55 1350,20 1360,45 1370,30 1400,30" fill="none" stroke="#6633ff" stroke-width="1.5" opacity="0.6"/>
+        <polyline points="
+          0,30 120,30 140,30 155,8 165,52 175,15 185,45 195,30 350,30
+          420,30 440,30 700,30
+          700,30 820,30 840,30 855,8 865,52 875,15 885,45 895,30 1050,30
+          1120,30 1140,30 1400,30"
+          fill="none" stroke="#00ff88" stroke-width="1.5" opacity="0.8"/>
       </svg>
     </div>
   </div>
@@ -1359,9 +1447,8 @@
 <!-- STATS -->
 <div class="stats-wrap reveal">
   <div class="stats">
-    <div class="stat"><span class="stat-value">1B</span><span class="stat-label">Total Supply</span></div>
-    <div class="stat"><span class="stat-value" id="ghostCount">2,401</span><span class="stat-label">Ghosts Active</span></div>
-    <div class="stat"><span class="stat-value">365d</span><span class="stat-label">Default Heartbeat</span></div>
+    <div class="stat"><a href="https://solscan.io/account/3Es13GXc4qwttE6uSgAAfi1zvBD3qzLkZpY21KfT3sZ3#anchorAccounts" target="_blank" style="text-decoration:none;color:inherit;display:contents"><span class="stat-value" id="ghostCount">2,401</span><span class="stat-label">Ghosts Active ↗</span></a></div>
+    <div class="stat"><span class="stat-value" id="avgHeartbeat">—</span><span class="stat-label">Avg Heartbeat</span></div>
     <div class="stat"><span class="stat-value">∞</span><span class="stat-label">Legacy Duration</span></div>
   </div>
 </div>
@@ -1438,40 +1525,40 @@
   <p class="manifesto-attr">— The GHOST Manifesto, 2026</p>
 </div>
 
+<!-- ACTIONS -->
+<section id="actions" style="max-width:900px;">
+  <span class="section-tag reveal">§04 — Ghost Actions</span>
+  <h2 class="section-title reveal">What happens when<br>you go dark.</h2>
+  <p class="section-body reveal">The moment your heartbeat expires, your ghost executes — automatically, on-chain, without a middleman. Your wealth doesn't disappear. It moves.</p>
+  <div class="actions-present reveal">
+    <div class="action-present-item">
+      <span class="action-present-icon">◎</span>
+      <div><strong>SOL reaches your people.</strong><p>Denominated exactly how you set it. Split across up to 10 wallets.</p></div>
+    </div>
+    <div class="action-present-item">
+      <span class="action-present-icon">🪙</span>
+      <div><strong>Every token follows.</strong><p>SPL tokens distributed to beneficiaries — nothing left behind.</p></div>
+    </div>
+    <div class="action-present-item">
+      <span class="action-present-icon">🔥</span>
+      <div><strong>What shouldn't survive, burns.</strong><p>Permanently destroy tokens on execution. No recovery.</p></div>
+    </div>
+    <div class="action-present-item">
+      <span class="action-present-icon">👥</span>
+      <div><strong>Up to 10 beneficiaries.</strong><p>Each with their own allocation. Set once, honoured forever.</p></div>
+    </div>
+  </div>
+</section>
+
 <!-- ROADMAP -->
 <section id="roadmap" style="max-width:1000px;">
   <span class="section-tag reveal">§03 — Roadmap</span>
   <h2 class="section-title reveal">The path<br>into the dark.</h2>
   <div class="roadmap-grid reveal">
-    <div class="road-card"><span class="road-badge">Phase I</span><h3>Summon</h3><span class="road-when">March 2026</span><ul><li>Fair launch on Pump.fun</li><li>Whitepaper &amp; website published</li><li>Community launch on X</li><li>Core protocol live on Solana mainnet</li><li>Ghost Dashboard — vault, beneficiaries &amp; heartbeat</li><li>SOL &amp; SPL token vault support</li><li>Recovery wallet support</li><li>Smart contract audit</li><li>Target: 1,500 holders</li></ul></div>
-    <div class="road-card"><span class="road-badge">Phase II</span><h3>Awaken</h3><span class="road-when">Q2 2026</span><ul><li>NFT vault support (Metaplex)</li><li>Time-locked transfers for beneficiaries</li><li>Auto-sell SPL tokens to SOL via Jupiter</li><li>Off-chain executor — post to X, send emails</li></ul></div>
+    <div class="road-card active"><span class="road-badge">Phase I</span><h3>Summon</h3><span class="road-when">March 2026</span><ul><li>Fair launch on Pump.fun</li><li>Whitepaper &amp; website published</li><li>Community launch on X</li><li>Core protocol live on Solana mainnet</li><li>Ghost Dashboard — vault, beneficiaries &amp; heartbeat</li><li>SOL &amp; SPL token vault support</li><li>Recovery wallet support</li><li>Smart contract audit</li><li>Target: 1,500 holders</li></ul></div>
+    <div class="road-card"><span class="road-badge">Phase II</span><h3>Awaken</h3><span class="road-when">Q2 2026</span><ul><li>NFT vault support (Metaplex)</li><li>Time-locked transfers for beneficiaries</li><li>Auto-sell SPL tokens to SOL via Jupiter</li><li>Off-chain executor — post to X, send emails</li><li>Telegram heartbeat reminders</li></ul></div>
     <div class="road-card"><span class="road-badge">Phase III</span><h3>Possess</h3><span class="road-when">Q3 2026</span><ul><li>Close DeFi positions (Jupiter, Marginfi, Drift)</li><li>Cross-chain bridges (Ethereum, Base)</li></ul></div>
     <div class="road-card"><span class="road-badge">Phase IV</span><h3>Eternal</h3><span class="road-when">Q4 2026</span><ul><li>Off-chain link to Pika Labs AI Selves profile</li><li>100k souls registered</li></ul></div>
-  </div>
-</section>
-
-<!-- ACTIONS -->
-<section id="actions" style="max-width:900px;">
-  <span class="section-tag reveal">§04 — Ghost Actions</span>
-  <h2 class="section-title reveal">What your ghost<br>can do.</h2>
-  <p class="section-body reveal">Configure exactly what happens when your heartbeat stops.</p>
-  <div class="actions-grid reveal">
-    <div class="action-col">
-      <h3>On-Chain — Available Now</h3>
-      <div class="action-item"><span class="action-icon">◎</span><p class="action-text">Send SOL to beneficiaries</p></div>
-      <div class="action-item"><span class="action-icon">🪙</span><p class="action-text">Send SPL tokens to beneficiaries</p></div>
-      <div class="action-item"><span class="action-icon">🔥</span><p class="action-text">Burn SPL tokens permanently</p></div>
-      <div class="action-item"><span class="action-icon">👥</span><p class="action-text">Split vault across up to 10 beneficiaries</p></div>
-    </div>
-    <div class="action-col" style="opacity:0.45;">
-      <h3>Coming — Phase II & III</h3>
-      <div class="action-item"><span class="action-icon">🔒</span><p class="action-text">Time-locked transfers <span>— vesting schedule</span></p></div>
-      <div class="action-item"><span class="action-icon">💱</span><p class="action-text">Auto-sell to SOL <span>— via Jupiter</span></p></div>
-      <div class="action-item"><span class="action-icon">📣</span><p class="action-text">Post a final message on X</p></div>
-      <div class="action-item"><span class="action-icon">📧</span><p class="action-text">Send emails to a list of people</p></div>
-      <div class="action-item"><span class="action-icon">💬</span><p class="action-text">Telegram heartbeat reminders</p></div>
-      <div class="action-item"><span class="action-icon">📊</span><p class="action-text">Close DeFi positions <span>— Jupiter, Marginfi, Drift</span></p></div>
-    </div>
   </div>
 </section>
 
@@ -1487,7 +1574,7 @@
     </div>
     <div style="padding:28px;background:rgba(255,153,51,0.04);border:1px solid rgba(255,153,51,0.15)">
       <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.25em;color:rgba(255,153,51,0.6);margin-bottom:10px;text-transform:uppercase">Execution Risk</div>
-      <p style="font-family:'Share Tech Mono',monospace;font-size:12px;color:#b0a8d0;line-height:1.8;margin:0">Off-chain features (Phase III) depend on external APIs that may change. On-chain actions are trustless and permanent.</p>
+      <p style="font-family:'Share Tech Mono',monospace;font-size:12px;color:#b0a8d0;line-height:1.8;margin:0">The GHOST executor bot is required for automatic distribution. If offline, assets remain safely in the vault until it resumes. On-chain transfers are trustless and permanent once submitted.</p>
     </div>
     <div style="padding:28px;background:rgba(102,51,255,0.04);border:1px solid rgba(102,51,255,0.15)">
       <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.25em;color:rgba(160,128,255,0.6);margin-bottom:10px;text-transform:uppercase">Regulatory Risk</div>
@@ -1522,8 +1609,10 @@
   <h2 class="cta-title">Are you<br>still alive?</h2>
   <p class="cta-sub">Register your heartbeat before the silence speaks for you.</p>
   <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;position:relative;z-index:2;">
-    <a class="btn-pump" href="https://pump.fun/coin/k4MxJAdy22Dgd2UTQ9p3etbnaSLUH1q5cEfSRi6pump" target="_blank"><span class="pump-icon">👻</span> Buy on Pump.fun</a>
-    <button class="btn-secondary" onclick="ghostState.connected ? openDashboard() : openModal()">Register Heartbeat</button>
+    <button class="btn-register" onclick="ghostState.connected ? openDashboard() : openModal()">
+      <span class="btn-register-pulse"></span>
+      <span class="btn-register-icon">💓</span> Register Heartbeat
+    </button>
   </div>
 </div>
 
@@ -1540,6 +1629,59 @@
 // Deployed program ID — matches declare_id! in lib.rs
 const PROGRAM_ID = '3Es13GXc4qwttE6uSgAAfi1zvBD3qzLkZpY21KfT3sZ3';
 const RPC_URL = 'https://mainnet.helius-rpc.com/?api-key=5a9a7cb2-8ee9-4656-bd60-6b5b11a3e92d';
+
+// ── On-chain ghost count + avg heartbeat ─────────────────────────
+async function fetchGhostCount() {
+  try {
+    const res = await fetch(RPC_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'getProgramAccounts',
+        params: [PROGRAM_ID, {
+          encoding: 'base64',
+          commitment: 'confirmed',
+          filters: [{ dataSize: 1220 }]
+        }]
+      })
+    });
+    const data = await res.json();
+    const accounts = data?.result ?? [];
+    const count = accounts.length;
+    if (count > 0) {
+      const el = document.getElementById('ghostCount');
+      if (el) el.textContent = count.toLocaleString();
+      console.log('[Ghost] On-chain ghost count:', count);
+    }
+    // ── Parse interval from each account to compute live average ──
+    // interval_seconds is i64 at a known offset after discriminator+fields
+    // discriminator(8) + owner(32) + vault(32) + stake_vault(32) + last_ping(8) + interval = offset 112
+    const INTERVAL_OFFSET = 112;
+    let totalDays = 0, validCount = 0;
+    for (const acct of accounts) {
+      try {
+        const raw = atob(acct.account.data[0]);
+        const bytes = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        const view = new DataView(bytes.buffer);
+        const intervalSec = Number(view.getBigInt64(INTERVAL_OFFSET, true));
+        const days = intervalSec / 86400;
+        if (days >= 1 && days <= 3650) { totalDays += days; validCount++; }
+      } catch(_) {}
+    }
+    if (validCount > 0) {
+      const avgDays = Math.round(totalDays / validCount);
+      const el = document.getElementById('avgHeartbeat');
+      if (el) el.textContent = avgDays >= 365
+        ? (avgDays / 365).toFixed(1).replace(/\.0$/, '') + 'y'
+        : avgDays + 'd';
+      console.log('[Ghost] Avg heartbeat:', avgDays, 'days from', validCount, 'accounts');
+    }
+  } catch(e) { console.log('[Ghost] ghostCount fetch failed', e); }
+}
+fetchGhostCount();
+setInterval(fetchGhostCount, 60000);
+
 const HELIUS_API = 'https://mainnet.helius-rpc.com/?api-key=5a9a7cb2-8ee9-4656-bd60-6b5b11a3e92d';
 const RPC_FALLBACKS = [];
 
@@ -1632,8 +1774,7 @@ const observer = new IntersectionObserver((entries) => {
 reveals.forEach(el => observer.observe(el));
 
 setInterval(() => {
-  const g = document.getElementById('ghostCount');
-  if (g && Math.random() > 0.5) g.textContent = (parseInt(g.textContent.replace(',','')) + 1).toLocaleString();
+  // ghost count refreshed on-chain
 }, 3500);
 
 // ─── Unified Live Price Cache ────────────────────────────────────
@@ -7547,5 +7688,78 @@ async function dbAbandon(skipConfirm) {
     </div>
   </div>
 </div>
+
+<script>
+// ── PARTICLES ────────────────────────────────────────────────
+(function() {
+  const canvas = document.getElementById('particle-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  let W, H, particles = [];
+  function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+  resize();
+  window.addEventListener('resize', resize);
+  for (let i = 0; i < 60; i++) {
+    particles.push({
+      x: Math.random() * 2000, y: Math.random() * 2000,
+      vx: (Math.random() - 0.5) * 0.3, vy: -Math.random() * 0.4 - 0.1,
+      size: Math.random() * 1.5 + 0.5,
+      opacity: Math.random() * 0.5 + 0.1,
+      color: Math.random() > 0.7 ? '#ff3366' : '#6633ff'
+    });
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    particles.forEach(p => {
+      p.x += p.vx; p.y += p.vy;
+      if (p.y < -10) { p.y = H + 10; p.x = Math.random() * W; }
+      if (p.x < -10) p.x = W + 10;
+      if (p.x > W + 10) p.x = -10;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = p.opacity;
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ── CURSOR TRAIL ─────────────────────────────────────────────
+(function() {
+  const trails = [];
+  const MAX = 8;
+  for (let i = 0; i < MAX; i++) {
+    const d = document.createElement('div');
+    d.className = 'cursor-trail';
+    d.style.opacity = '0';
+    document.body.appendChild(d);
+    trails.push({ el: d, x: 0, y: 0 });
+  }
+  let mx = 0, my = 0;
+  document.addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; });
+  function updateTrails() {
+    trails[0].x += (mx - trails[0].x) * 0.35;
+    trails[0].y += (my - trails[0].y) * 0.35;
+    for (let i = 1; i < MAX; i++) {
+      trails[i].x += (trails[i-1].x - trails[i].x) * 0.6;
+      trails[i].y += (trails[i-1].y - trails[i].y) * 0.6;
+    }
+    trails.forEach((t, i) => {
+      t.el.style.left = t.x + 'px';
+      t.el.style.top = t.y + 'px';
+      t.el.style.opacity = (1 - i / MAX) * 0.5 + '';
+      t.el.style.transform = `translate(-50%,-50%) scale(${1 - i * 0.1})`;
+    });
+    requestAnimationFrame(updateTrails);
+  }
+  updateTrails();
+})();
+
+// ── GHOST COUNT GLOW on update ───────────────────────────────
+const _origFetchGhostCount = fetchGhostCount;
+</script>
 </body>
 </html>
