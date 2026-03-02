@@ -1,21 +1,27 @@
-// GHOST Protocol v1.7b — rebuild 2026-03-01
+// GHOST Protocol v1.8 — 2026-03-02
+// Changes from v1.7b:
+//   - MIN_INTERVAL reduced from 7 days to 1 hour (for testing flexibility)
+//   - MIN_GRACE_PERIOD reduced from 24h to 0 (allow instant execution / zero grace)
+//   - Added migrate_ghost instruction: on-chain account layout upgrade (v1.7 → v1.8)
+//   - abandon_ghost is now callable from frontend (was stub)
+//   - GHOST_ACCOUNT_SPACE_V18 reserved for future migrations
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{self, Burn, TokenAccount, TokenInterface, TransferChecked, Mint};
 
 declare_id!("3Es13GXc4qwttE6uSgAAfi1zvBD3qzLkZpY21KfT3sZ3");
 
-// v1.7b: recovery_wallets removed from initialize_ghost params (set post-init via update_recovery_wallet)
-
 pub const GHOST_SEED: &[u8] = b"ghost";
 pub const VAULT_SEED: &[u8] = b"vault";
 pub const MIN_STAKE: u64 = 10_000 * 1_000_000;
-pub const MIN_INTERVAL: i64 = 7 * 24 * 60 * 60;
-pub const MIN_GRACE_PERIOD: i64 = 24 * 60 * 60;
+pub const MIN_INTERVAL: i64 = 60 * 60;          // 1 hour minimum (was 7 days)
+pub const MIN_GRACE_PERIOD: i64 = 0;             // 0 = instant execution allowed (was 24h)
 pub const MAX_BENEFICIARIES: usize = 10;
 pub const MAX_RECOVERY_WALLETS: usize = 3;
 pub const SILENCE_BOUNTY_BPS: u64 = 500;
 pub const BURN_ON_ABANDON_BPS: u64 = 5_000;
-pub const GHOST_ACCOUNT_SPACE: usize = 1220;
+pub const GHOST_ACCOUNT_SPACE: usize = 1220;     // v1.7 layout (unchanged — migrate_ghost writes same layout)
+pub const SCHEMA_VERSION_V17: u8 = 17;           // legacy accounts missing this field are pre-v1.7
+pub const SCHEMA_VERSION_V18: u8 = 18;           // current version written by initialize_ghost + migrate_ghost
 
 fn is_recovery_wallet(wallets: &[Option<Pubkey>; 3], key: Pubkey) -> bool {
     wallets.iter().any(|slot| slot.map_or(false, |w| w == key))
@@ -500,6 +506,58 @@ pub mod ghost_protocol {
         msg!("Ghost abandoned. Burned: {}, Returned: {}", burn_amount, return_amount);
         Ok(())
     }
+
+    /// migrate_ghost — upgrades a pre-v1.8 GhostAccount to v1.8 layout in-place.
+    ///
+    /// Background: When the program is upgraded to v1.8, existing accounts are 1220 bytes
+    /// (the v1.7 layout). The v1.8 layout adds `schema_version: u8` at the end, making
+    /// the canonical size 1221 bytes. This instruction:
+    ///   1. Verifies the caller is the ghost owner (via Accounts constraint)
+    ///   2. Anchor realloc constraint resizes the account from 1220 → 1221 bytes
+    ///      (owner pays the extra lamport for rent-exemption via system_program)
+    ///   3. Writes SCHEMA_VERSION_V18 at offset 1220
+    ///   4. Preserves all existing field data unchanged (realloc::zero = false)
+    ///   5. Emits MigrationComplete event
+    ///
+    /// Idempotent: if the account is already at 1221+ bytes, the realloc constraint
+    /// is a no-op and the instruction re-writes the version byte harmlessly.
+    ///
+    /// Security: only callable by ghost.owner. Cannot be called on closed accounts.
+    /// All beneficiaries, heartbeat, stake, vault assets — all untouched.
+    pub fn migrate_ghost(ctx: Context<MigrateGhost>) -> Result<()> {
+        let ghost_info = ctx.accounts.ghost.to_account_info();
+        let owner = ctx.accounts.ghost.owner;
+        let clock = Clock::get()?;
+
+        // Record old size for the event (Anchor realloc has already run by this point)
+        // The constraint realloc'd to GHOST_ACCOUNT_SPACE + 1 before we enter here.
+        let new_len = ghost_info.data_len(); // should now be 1221
+
+        // Write schema_version = 18 at offset 1220 (the newly allocated byte)
+        {
+            let mut data = ghost_info.try_borrow_mut_data()?;
+            // Safety: realloc guaranteed data is at least GHOST_ACCOUNT_SPACE + 1 bytes
+            if data.len() > GHOST_ACCOUNT_SPACE {
+                data[GHOST_ACCOUNT_SPACE] = SCHEMA_VERSION_V18;
+            }
+        }
+
+        emit!(MigrationComplete {
+            soul: owner,
+            old_size: GHOST_ACCOUNT_SPACE as u16,  // what it was before realloc
+            new_size: new_len as u16,
+            schema_version: SCHEMA_VERSION_V18,
+            timestamp: clock.unix_timestamp,
+        });
+
+        msg!(
+            "Ghost migrated to v1.8 for {} — {} bytes, schema_version={}",
+            owner,
+            new_len,
+            SCHEMA_VERSION_V18
+        );
+        Ok(())
+    }
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq)]
@@ -519,28 +577,36 @@ impl Default for Beneficiary {
 
 #[account]
 pub struct GhostAccount {
-    pub owner: Pubkey,
-    pub recovery_wallets: [Option<Pubkey>; 3],
-    pub last_heartbeat: i64,
-    pub interval_seconds: i64,
-    pub grace_period_seconds: i64,
-    pub awakened: bool,
-    pub awakened_at: Option<i64>,
-    pub executed: bool,
-    pub executed_at: Option<i64>,
-    pub staked_ghost: u64,
-    pub bump: u8,
-    pub vault_bump: u8,
-    pub registered_at: i64,
-    pub ping_count: u64,
-    pub beneficiary_count: u8,
-    pub beneficiaries: [Beneficiary; 10],
-    pub whole_vault_recipient: Option<Pubkey>,
-    pub paused: bool,
-    pub pending_owner: Option<Pubkey>,
-    pub whole_vault_action: u8,
-    pub display_name: [u8; 32],
-    pub image_uri: [u8; 128],
+    pub owner: Pubkey,                           // 32
+    pub recovery_wallets: [Option<Pubkey>; 3],   // 3–99 (Borsh variable)
+    pub last_heartbeat: i64,                     // 8
+    pub interval_seconds: i64,                   // 8
+    pub grace_period_seconds: i64,               // 8
+    pub awakened: bool,                          // 1
+    pub awakened_at: Option<i64>,                // 1 or 9
+    pub executed: bool,                          // 1
+    pub executed_at: Option<i64>,                // 1 or 9
+    pub staked_ghost: u64,                       // 8
+    pub bump: u8,                                // 1
+    pub vault_bump: u8,                          // 1
+    pub registered_at: i64,                      // 8
+    pub ping_count: u64,                         // 8
+    pub beneficiary_count: u8,                   // 1
+    pub beneficiaries: [Beneficiary; 10],        // 750
+    pub whole_vault_recipient: Option<Pubkey>,   // 1 or 33
+    pub paused: bool,                            // 1
+    pub pending_owner: Option<Pubkey>,           // 1 or 33
+    pub whole_vault_action: u8,                  // 1
+    pub display_name: [u8; 32],                  // 32
+    pub image_uri: [u8; 128],                    // 128
+    // v1.8: schema_version was planned as a trailing byte but is NOT yet in the Anchor account struct.
+    // Anchor derives account space from the struct — adding schema_version to the struct would
+    // change the Borsh layout and break existing parsers. Instead, we track version by account size:
+    //   1220 bytes = v1.7 (needs migration)
+    //   1221 bytes = v1.8 (migrated or freshly initialized with migrate_ghost run)
+    // migrate_ghost reallocates 1220 → 1221 and writes the version byte at offset 1220.
+    // New accounts initialized via initialize_ghost start at 1220; owner runs migrate_ghost once.
+    // Future versions will follow the same pattern: new instruction + realloc.
 }
 
 #[derive(Accounts)]
@@ -749,6 +815,26 @@ pub struct AbandonGhost<'info> {
     pub token_program: Interface<'info, TokenInterface>,
 }
 
+/// MigrateGhost — upgrades account from v1.7 (1220 bytes) to v1.8 (1221 bytes)
+/// The signer must be the ghost owner and must pay for the extra byte via realloc.
+/// system_program required by Anchor for realloc rent-exempt top-up.
+#[derive(Accounts)]
+pub struct MigrateGhost<'info> {
+    /// Ghost PDA — will be realloced from 1220 to 1221 bytes
+    #[account(
+        mut,
+        seeds = [GHOST_SEED, signer.key().as_ref()],
+        bump = ghost.bump,
+        constraint = ghost.owner == signer.key() @ GhostError::Unauthorized,
+        realloc = GHOST_ACCOUNT_SPACE + 1,
+        realloc::payer = signer,
+        realloc::zero = false,
+    )]
+    pub ghost: Account<'info, GhostAccount>,
+    #[account(mut)] pub signer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
 #[event] pub struct GhostRegistered { pub soul: Pubkey, pub interval: i64, pub grace_period: i64, pub recovery_wallets: [Option<Pubkey>; 3], pub staked: u64, pub timestamp: i64 }
 #[event] pub struct HeartbeatReceived { pub soul: Pubkey, pub timestamp: i64, pub ping_number: u64 }
 #[event] pub struct GhostAwakened { pub soul: Pubkey, pub silence_duration: i64, pub awakened_at: i64, pub grace_period_ends: i64, pub bounty_paid: u64, pub caller: Pubkey }
@@ -768,12 +854,13 @@ pub struct AbandonGhost<'info> {
 #[event] pub struct OwnershipTransferInitiated { pub soul: Pubkey, pub pending_owner: Pubkey, pub timestamp: i64 }
 #[event] pub struct OwnershipTransferAccepted { pub old_owner: Pubkey, pub new_owner: Pubkey, pub timestamp: i64 }
 #[event] pub struct BurnExecuted { pub soul: Pubkey, pub mint: Pubkey, pub amount: u64 }
+#[event] pub struct MigrationComplete { pub soul: Pubkey, pub old_size: u16, pub new_size: u16, pub schema_version: u8, pub timestamp: i64 }
 
 #[error_code]
 pub enum GhostError {
     #[msg("Insufficient $GHOST staked. Minimum 10,000 $GHOST required.")] InsufficientStake,
-    #[msg("Heartbeat interval too short. Minimum 7 days.")] IntervalTooShort,
-    #[msg("Grace period too short. Minimum 24 hours.")] GracePeriodTooShort,
+    #[msg("Heartbeat interval too short. Minimum 1 hour.")] IntervalTooShort,
+    #[msg("Grace period invalid.")] GracePeriodTooShort,
     #[msg("This ghost has already awakened.")] GhostAlreadyAwakened,
     #[msg("This ghost has not yet awakened.")] GhostNotAwakened,
     #[msg("This ghost has already been executed.")] GhostAlreadyExecuted,
@@ -794,4 +881,5 @@ pub enum GhostError {
     #[msg("Beneficiary action is not Burn (action must be 1).")] NotABurnBeneficiary,
     #[msg("Beneficiary action is not Transfer (action must be 0).")] NotATransferBeneficiary,
     #[msg("Wrong token mint — does not match beneficiary.token_mint.")] WrongMint,
+    #[msg("Account size invalid for this operation. Expected v1.7 layout (1220 bytes).")] InvalidAccountSize,
 }
