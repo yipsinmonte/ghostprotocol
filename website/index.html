@@ -2679,15 +2679,23 @@ async function fetchGhostAccount() {
       const i64 = o => Number(v.getBigInt64(o, true));
       const u64 = o => Number(v.getBigUint64(o, true));
       console.log('[Ghost] ACCOUNT DUMP — total bytes:', bytes.length);
-      console.log('[Ghost] off  8 (owner):', Array.from(bytes.slice(8,40)).map(b=>hex(b)).join(''));
-      console.log('[Ghost] off 40 byte40:', bytes[40], 'byte41:', bytes[41], 'byte42:', bytes[42], 'byte43:', bytes[43]);
-      // Try interval at various offsets
-      for (const o of [139, 143, 147, 151]) {
-        try { console.log(`[Ghost] interval@${o}:`, i64(o), 'grace@'+(o+8)+':', i64(o+8)); } catch(_){}
-      }
-      // Dump bytes 40-60
-      console.log('[Ghost] bytes[40-60]:', Array.from(bytes.slice(40,60)).map(b=>hex(b)).join(' '));
-      console.log('[Ghost] bytes[135-165]:', Array.from(bytes.slice(135,165)).map(b=>hex(b)).join(' '));
+      console.log('[Ghost] bytes[139-215]:', Array.from(bytes.slice(139,215)).map(b=>hex(b)).join(' '));
+      // Show key field values at both possible Option layouts
+      const _dumpOff = (label, off) => {
+        try { console.log(`[Ghost] DUMP ${label} @${off}: u64=${u64(off)} i64=${i64(off)} byte=${bytes[off]}`); } catch(_){}
+      };
+      // Confirmed: last_heartbeat@139, interval@147, grace@155, awakened@163, next@164
+      console.log('[Ghost] last_heartbeat@139:', i64(139));
+      console.log('[Ghost] interval@147:', i64(147), 'grace@155:', i64(155));
+      console.log('[Ghost] awakened@163:', bytes[163], 'byte164:', bytes[164], 'byte165:', bytes[165], 'byte166:', bytes[166]);
+      // Variable Option layout (None=1byte)
+      console.log('[Ghost] VAR: staked@167:', u64(167), 'bump@175:', bytes[175], 'vault_bump@176:', bytes[176]);
+      console.log('[Ghost] VAR: registered@177:', i64(177), 'pings@185:', u64(185), 'benefCount@193:', bytes[193]);
+      // Fixed 9-byte Option layout
+      console.log('[Ghost] FIX: staked@183:', u64(183), 'bump@191:', bytes[191], 'vault_bump@192:', bytes[192]);
+      console.log('[Ghost] FIX: registered@193:', i64(193), 'pings@201:', u64(201), 'benefCount@209:', bytes[209]);
+      // Dump bytes for manual inspection
+      console.log('[Ghost] bytes[163-215]:', Array.from(bytes.slice(163,215)).map(b=>hex(b)).join(' '));
     })();
     updateDashboardUI();
 
