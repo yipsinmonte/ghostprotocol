@@ -6585,7 +6585,7 @@ async function dbMigrateAccount() {
 
     // sha256("global:migrate_ghost")[0:8]
     // Anchor discriminator for migrate_ghost instruction
-    const disc = [53, 196, 153, 211, 44, 218, 7, 104];
+    const disc = [233, 201, 87, 45, 9, 54, 200, 2];
 
     // MigrateGhost accounts (matches MigrateGhost context in lib.rs):
     // ghost (mut, realloc), signer (mut), system_program
@@ -7928,7 +7928,7 @@ async function dbAbandonOnChain() {
     }
 
     // sha256("global:abandon_ghost")[0:8]
-    const disc = [119, 54, 173, 140, 202, 18, 134, 100];
+    const disc = [202, 209, 166, 252, 21, 52, 60, 194];
 
     // Derive ghost_stake_vault: seeds = ["stake_vault", signer]
     const [ghostStakeVault] = await PublicKey.findProgramAddress(
