@@ -3118,7 +3118,7 @@ function parseGhostAccount(bytes) {
         token: mintSym, mint: mintPk,
         action: isBurn ? 'burn' : 'transfer', executed: execByte === 1, _fromChain: true,
       };
-      if (!_isClearedLocally(_benef)) _chainBenefs.push(_benef);
+      _chainBenefs.push(_benef); // chain is authoritative — no local filter
     }
     // Chain is authoritative — replace all; whole-vault-share re-added below from wholeVaultRecipient
     ghostState.ghost.beneficiaries = [..._chainBenefs];
@@ -4553,39 +4553,57 @@ async function dbClearAllBeneficiaries() {
     return;
   }
 
-  // On-chain clear using v1.4 clear_all_beneficiaries (single instruction, no loop)
-  // If clearing ONLY stale: use N remove_beneficiary(0) for just those slots
-  // If clearing ALL: use the new clear_all_beneficiaries instruction (one ix, atomic)
+  // On-chain clear — remove_beneficiary(index) in one batched tx.
+  // clear_all_beneficiaries does NOT exist in the deployed program.
+  // Strategy: remove from highest index to lowest in a single tx.
+  // The contract shifts entries down after each remove, so we send
+  // descending indices in one transaction — order matters.
   try {
     showNotif('Sending on-chain clear...', '');
     const { PublicKey, Transaction, TransactionInstruction } = solanaWeb3;
     const walletPk = new PublicKey(ghostState.publicKey);
     const ghostPda = new PublicKey(ghostState.ghostPda);
     const connection = new solanaWeb3.Connection(RPC_URL, 'confirmed');
-    const { blockhash } = await connection.getLatestBlockhash();
-    const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
+    const removeDisc = [67, 27, 24, 153, 135, 64, 202, 77]; // remove_beneficiary
 
     if (clearWorking || finalToClear.length === freshSlots.length) {
-      // Clear ALL slots — use single clear_all_beneficiaries instruction (v1.4)
-      tx.add(new TransactionInstruction({
-        programId: new PublicKey(PROGRAM_ID),
-        keys: [{ pubkey: ghostPda, isSigner:false, isWritable:true }, { pubkey: walletPk, isSigner:true, isWritable:true }],
-        data: new Uint8Array(DISC_CLEAR_ALL_BENES)
-      }));
+      // Clearing ALL — remove index 0 repeated N times in one tx.
+      // Each removal shifts remaining entries down, so index 0 always points to next.
+      const count = freshSlots.length;
+      const { blockhash } = await connection.getLatestBlockhash();
+      const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
+      for (let i = 0; i < count; i++) {
+        const d = new Uint8Array(9); d.set(removeDisc, 0); d[8] = 0; // always index 0
+        tx.add(new TransactionInstruction({
+          programId: new PublicKey(PROGRAM_ID),
+          keys: [{ pubkey: ghostPda, isSigner:false, isWritable:true }, { pubkey: walletPk, isSigner:true, isWritable:true }],
+          data: d
+        }));
+      }
+      const signed = await ghostState.provider.signTransaction(tx);
+      const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' });
+      const conf = await connection.confirmTransaction(sig, 'confirmed');
+      if (conf.value?.err) throw new Error(JSON.stringify(conf.value.err));
+      ghostState.ghost.beneficiaries = ghostState.ghost.beneficiaries.filter(b => b.action === 'whole-vault-share');
+      _refreshBenePickers(); renderBeneficiaries(); renderVaultHoldings();
+      addActivityRow('🗑️ Cleared ' + count + ' beneficiar' + (count===1?'y':'ies'), sig.slice(0,4)+'...'+sig.slice(-4));
+      setTimeout(() => fetchOnChainHistory().catch(()=>{}), 3000);
+      showNotif('Cleared ' + count + ' slot(s) on-chain!', 'green');
     } else {
-      // Clear only the stale slots — still use remove_beneficiary(0) loop
-      // We must remove from highest index down to avoid shifting issues... actually
-      // contract shifts array down after each remove, so always target index 0 for N removes
-      // But we only want to remove specific slots, so map stale slots to their on-chain indices
-      // Sort stale slots by their position in freshSlots (ascending), remove from end to start
-      const staleIndices = finalToClear.map(b => {
-        return freshSlots.findIndex(f =>
-          (f.fullAddr && f.fullAddr === b.fullAddr) ||
+      // Clearing ONLY stale slots — find their on-chain indices, remove highest first.
+      // After each removal in the tx the array shifts, so we must adjust indices:
+      // Send in descending order; each instruction targets the current live index.
+      const staleIndices = finalToClear.map(b =>
+        freshSlots.findIndex(f =>
+          (f.fullAddr && b.fullAddr && f.fullAddr === b.fullAddr) ||
           (f.recipient === b.recipient && f.amount === b.amount && f.mint === b.mint)
-        );
-      }).filter(i => i >= 0).sort((a,b) => b - a); // descending — remove from end first
-
-      const removeDisc = [67, 27, 24, 153, 135, 64, 202, 77]; // remove_beneficiary disc
+        )
+      ).filter(i => i >= 0);
+      // Sort descending — remove highest index first so lower indices stay stable
+      staleIndices.sort((a, b) => b - a);
+      if (staleIndices.length === 0) { showNotif('Could not match stale slots', 'error'); return; }
+      const { blockhash } = await connection.getLatestBlockhash();
+      const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
       for (const idx of staleIndices) {
         const d = new Uint8Array(9); d.set(removeDisc, 0); d[8] = idx;
         tx.add(new TransactionInstruction({
@@ -4594,34 +4612,23 @@ async function dbClearAllBeneficiaries() {
           data: d
         }));
       }
-    }
-
-    const signed = await ghostState.provider.signTransaction(tx);
-    const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: true });
-    const conf = await connection.confirmTransaction(sig, 'confirmed');
-    if (conf.value?.err) throw new Error(JSON.stringify(conf.value.err));
-
-    // Update local state
-    if (clearWorking || finalToClear.length === freshSlots.length) {
-      ghostState.ghost.beneficiaries = ghostState.ghost.beneficiaries.filter(b => b.action === 'whole-vault-share');
-    } else {
+      const signed = await ghostState.provider.signTransaction(tx);
+      const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' });
+      const conf = await connection.confirmTransaction(sig, 'confirmed');
+      if (conf.value?.err) throw new Error(JSON.stringify(conf.value.err));
       ghostState.ghost.beneficiaries = ghostState.ghost.beneficiaries.filter(
         b => b.action === 'whole-vault-share' || _isWorkingSlot(b)
       );
+      _refreshBenePickers(); renderBeneficiaries(); renderVaultHoldings();
+      addActivityRow('🗑️ Cleared ' + staleIndices.length + ' beneficiar' + (staleIndices.length===1?'y':'ies'), sig.slice(0,4)+'...'+sig.slice(-4));
+      setTimeout(() => fetchOnChainHistory().catch(()=>{}), 3000);
+      showNotif('Cleared ' + staleIndices.length + ' stale slot(s) on-chain!', 'green');
     }
-    _refreshBenePickers(); renderBeneficiaries(); renderVaultHoldings();
-    addActivityRow('🗑️ Cleared ' + finalToClear.length + ' beneficiar' + (finalToClear.length===1?'y':'ies'), sig.slice(0,4)+'...'+sig.slice(-4));
-    showNotif('Cleared ' + finalToClear.length + ' slot(s) on-chain!', 'green');
-
   } catch(err) {
     console.warn('[Ghost] Clear failed:', err.message);
-    // Fallback: local wipe with fingerprint persistence
-    _saveClearedBeneficiaries(finalToClear);
-    ghostState.ghost.beneficiaries = ghostState.ghost.beneficiaries.filter(
-      b => b.action === 'whole-vault-share' || (!clearWorking && _isWorkingSlot(b))
-    );
-    _refreshBenePickers(); renderBeneficiaries(); renderVaultHoldings();
-    showNotif('Cleared locally (on-chain failed: ' + (err.message||'unknown') + ')', '');
+    showNotif('Failed: ' + (err.message||'unknown') + ' — refresh to resync', 'error');
+    // Re-fetch chain state so local state stays accurate
+    setTimeout(() => fetchGhostAccount().catch(()=>{}), 1500);
   }
 }
 
@@ -4863,14 +4870,26 @@ async function dbRemoveBeneficiary(index, _silent) {
     return;
   }
 
-  // On-chain remove_beneficiary(index: u8)
-  // on-chain index = count of non-whole-vault-share entries before this position
-  const onChainIndex = ghostState.ghost.beneficiaries
-    .slice(0, index)
-    .filter(b => b.action !== 'whole-vault-share')
-    .length;
-
+  // Always re-fetch chain state before removing to get accurate on-chain index.
+  // Local state can desync (e.g. after a failed clear-all), causing wrong index → Custom:102.
   try {
+    showNotif('Syncing chain state...', '');
+    await fetchGhostAccount().catch(() => {});
+
+    // Find the entry in the freshly-fetched chain state by matching fullAddr + amount + mint
+    const chainBenes = ghostState.ghost.beneficiaries.filter(b => b.action !== 'whole-vault-share');
+    const onChainIndex = chainBenes.findIndex(b =>
+      (entry.fullAddr && b.fullAddr === entry.fullAddr) ||
+      (b.recipient === entry.recipient && b.amount === entry.amount && b.mint === entry.mint)
+    );
+    if (onChainIndex < 0) {
+      // Not found on chain — already removed, just clean up local state
+      ghostState.ghost.beneficiaries.splice(index, 1);
+      _refreshBenePickers(); renderBeneficiaries(); renderVaultHoldings();
+      showNotif('Beneficiary already removed on-chain', 'green');
+      return;
+    }
+
     showNotif('Removing beneficiary on-chain...', '');
     const { PublicKey, Transaction, TransactionInstruction } = solanaWeb3;
     const walletPk = new PublicKey(ghostState.publicKey);
@@ -4880,7 +4899,7 @@ async function dbRemoveBeneficiary(index, _silent) {
     const disc = [67, 27, 24, 153, 135, 64, 202, 77];
     const data = new Uint8Array(9);
     data.set(disc, 0);
-    data[8] = onChainIndex;
+    data[8] = onChainIndex; // confirmed from fresh chain state
 
     const ix = new TransactionInstruction({ programId,
       keys: [
@@ -4895,11 +4914,16 @@ async function dbRemoveBeneficiary(index, _silent) {
     const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
     tx.add(ix);
     const signed = await ghostState.provider.signTransaction(tx);
-    const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: true });
+    const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' });
     const conf = await connection.confirmTransaction(sig, 'confirmed');
     if (conf.value?.err) throw new Error('TX failed: ' + JSON.stringify(conf.value.err));
 
-    ghostState.ghost.beneficiaries.splice(index, 1);
+    // Remove the matched entry from local state (use fresh index after re-fetch)
+    const localIdx = ghostState.ghost.beneficiaries.findIndex(b =>
+      (entry.fullAddr && b.fullAddr === entry.fullAddr) ||
+      (b.recipient === entry.recipient && b.amount === entry.amount && b.mint === entry.mint)
+    );
+    if (localIdx >= 0) ghostState.ghost.beneficiaries.splice(localIdx, 1);
     _refreshBenePickers(); renderBeneficiaries(); renderVaultHoldings();
     const _removedAddr = entry.fullAddr ? entry.fullAddr.slice(0,4)+'...'+entry.fullAddr.slice(-4) : (entry.recipient||'');
     addActivityRow('❌ Beneficiary removed · ' + _removedAddr, sig.slice(0,4)+'...'+sig.slice(-4));
@@ -4908,6 +4932,7 @@ async function dbRemoveBeneficiary(index, _silent) {
   } catch(err) {
     console.error('Remove beneficiary error:', err);
     showNotif('Failed: ' + (err.message || err), 'error');
+    setTimeout(() => fetchGhostAccount().catch(()=>{}), 1500);
   }
 }
 
