@@ -140,6 +140,20 @@ function parseGhost(pubkeyStr, data) {
 
     const wholeVaultAction = data[o]; o += 1;
 
+    // Sanity guard — catches offset drift / garbage parse on v1.7 accounts
+    const MIN_IV = 3600;           // 1 hour (program minimum)
+    const MAX_IV = 365 * 24 * 3600; // 1 year
+    const MIN_HB = 1_600_000_000;  // ~Solana mainnet launch
+    const MAX_HB = 2_000_000_000;  // ~2033
+    if (intervalSeconds < MIN_IV || intervalSeconds > MAX_IV) {
+      console.warn(`  ⚠️  ${pubkeyStr.slice(0,8)}... implausible interval (${intervalSeconds}s) — skipping (v1.7 parse drift)`);
+      return null;
+    }
+    if (lastHeartbeat < MIN_HB || lastHeartbeat > MAX_HB) {
+      console.warn(`  ⚠️  ${pubkeyStr.slice(0,8)}... implausible heartbeat (${lastHeartbeat}) — skipping`);
+      return null;
+    }
+
     return { pubkey: pubkeyStr, owner, lastHeartbeat, intervalSeconds, gracePeriodSeconds,
              awakened, awakenedAt, executed, bump, vaultBump,
              beneficiaryCount, beneficiaries, wholeVaultRecipient, wholeVaultAction, paused };
