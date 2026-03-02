@@ -2667,7 +2667,6 @@ async function fetchGhostAccount() {
       console.log('[Ghost] bytes[135-165]:', Array.from(bytes.slice(135,165)).map(b=>hex(b)).join(' '));
     })();
     updateDashboardUI();
-    showNotif('✓ Ghost account loaded from chain', 'green');
 
     // Pull on-chain tx history in the background (don't await — non-blocking)
     fetchOnChainHistory().catch(e => console.warn('[Ghost] History fetch failed:', e));
@@ -7995,8 +7994,13 @@ async function dbUpdateInterval() {
     addActivityRow('⏱️ Heartbeat interval set to ' + formatIntervalLabel(seconds), sig.slice(0,4)+'...'+sig.slice(-4));
     addActivityRow('💓 Heartbeat sent with interval update', sig.slice(0,4)+'...'+sig.slice(-4));
     showNotif('✅ Interval updated + heartbeat sent: ' + formatIntervalLabel(seconds), 'green');
-    // Re-fetch from chain — lastHeartbeat now = this tx time, deadline = now + new interval
-    await fetchGhostAccount();
+    // Poll chain until lastHeartbeat updates — RPC may return stale data immediately after tx
+    const _expectedBeat = Math.floor(Date.now() / 1000);
+    for (let _i = 0; _i < 5; _i++) {
+      await new Promise(r => setTimeout(r, 1200));
+      await fetchGhostAccount();
+      if ((ghostState.ghost.lastHeartbeat || 0) >= (_expectedBeat - 5) * 1000) break;
+    }
     updateDashboardUI(); syncSettingsDisplay(); updateCountdown();
   } catch(err) { showNotif('Failed: ' + (err.message || err), 'error'); }
 }
@@ -8061,8 +8065,13 @@ async function dbUpdateGrace() {
     addActivityRow('⏳ Grace period set to ' + label, sig.slice(0,4)+'...'+sig.slice(-4));
     addActivityRow('💓 Heartbeat sent with grace update', sig.slice(0,4)+'...'+sig.slice(-4));
     showNotif('✅ Grace period updated + heartbeat sent: ' + label, 'green');
-    // Re-fetch from chain so gracePeriodSeconds is authoritative
-    await fetchGhostAccount();
+    // Poll chain until gracePeriodSeconds updates — RPC may return stale data immediately after tx
+    const _expectedGrace = seconds;
+    for (let _i = 0; _i < 5; _i++) {
+      await new Promise(r => setTimeout(r, 1200));
+      await fetchGhostAccount();
+      if (ghostState.ghost.gracePeriodSeconds === _expectedGrace) break;
+    }
     updateDashboardUI(); syncSettingsDisplay();
   } catch(err) { showNotif('Failed: ' + (err.message || err), 'error'); }
 }
