@@ -4684,7 +4684,7 @@ async function dbAddBeneficiary(action) {
     const mergeNote = mergedCount > 0 ? ' · merged ' + mergedCount + ' existing entr' + (mergedCount === 1 ? 'y' : 'ies') : '';
     showNotif((isWholeBurn ? '🔥 Sending burn instruction' : ('👻 Assigning vault → ' + short + mergeNote)) + '...', '');
     // Fire on-chain tx first — only update UI after it confirms
-    const _wvOk = await dbSaveWholeVaultPlan(isWholeBurn ? 1 : 0);
+    const _wvOk = await dbSaveWholeVaultPlan(isWholeBurn ? 1 : 0, isWholeBurn ? null : recipient);
     if (_wvOk !== false) {
       // On-chain confirmed — now update local state
       if (!ghostState.ghost.wholeVaultShares) ghostState.ghost.wholeVaultShares = [];
@@ -4834,6 +4834,7 @@ async function dbAddBeneficiary(action) {
     document.getElementById(amountInput).value = '';
     if (!isBurn) document.getElementById('newRecipient').value = '';
     addActivityRow(isBurn ? '🔥 Burn instruction' : ('🎯 Beneficiary added · ' + short), shortSig);
+    setTimeout(() => fetchOnChainHistory().catch(()=>{}), 3000); // re-label from chain
     const mergeNote2 = mergedFromWhole ? ' · whole-vault assignment replaced' : '';
     showNotif(isBurn ? '🔥 Burn instruction confirmed!' : ('✅ Beneficiary added on-chain!' + mergeNote2), 'green');
   } catch(err) {
@@ -4902,6 +4903,7 @@ async function dbRemoveBeneficiary(index, _silent) {
     _refreshBenePickers(); renderBeneficiaries(); renderVaultHoldings();
     const _removedAddr = entry.fullAddr ? entry.fullAddr.slice(0,4)+'...'+entry.fullAddr.slice(-4) : (entry.recipient||'');
     addActivityRow('❌ Beneficiary removed · ' + _removedAddr, sig.slice(0,4)+'...'+sig.slice(-4));
+    setTimeout(() => fetchOnChainHistory().catch(()=>{}), 3000);
     showNotif('Beneficiary removed on-chain!', 'green');
   } catch(err) {
     console.error('Remove beneficiary error:', err);
@@ -5001,22 +5003,20 @@ async function removeWholeVaultShare(i) {
   renderWholeVaultShares();
 }
 
-async function dbSaveWholeVaultPlan(wvAction) {
+async function dbSaveWholeVaultPlan(wvAction, _directRecipient) {
   const _wvAct = wvAction ?? ghostState.ghost.wholeVaultAction ?? 0; // 0=Transfer, 1=Burn
-  const shares = ghostState.ghost.wholeVaultShares || [];
-  if (shares.length === 0) { showNotif('Add a recipient first', 'error'); return; }
-  const share = shares[0]; // contract stores single Option<Pubkey>
-  const recipient = share.fullAddr;
   const isBurnAll = _wvAct === 1;
-  // For burn, we send recipient=owner (placeholder, unused by burn path) or system_program address
+  // Use directly passed recipient (from call site) or fall back to stored shares
+  const recipient = _directRecipient ?? (ghostState.ghost.wholeVaultShares||[])[0]?.fullAddr;
   const recipientPk = isBurnAll ? ghostState.publicKey : recipient;
-  if (!isBurnAll && (!recipientPk || recipientPk.length < 32)) { showNotif('Invalid recipient address', 'error'); return; }
+  if (!isBurnAll && (!recipientPk || recipientPk.length < 32)) { showNotif('⚠️ Enter a valid recipient address', 'error'); return false; }
+  const share = { addr: recipientPk ? recipientPk.slice(0,4)+'...'+recipientPk.slice(-4) : '(burn all)', fullAddr: isBurnAll ? null : recipientPk };
 
   if (!ghostState.provider || ghostState.walletName?.includes('demo')) {
     _applyWholeVaultLocally(share);
     showNotif(isBurnAll ? '🔥 Whole vault burn set [demo]' : 'Whole vault recipient set [demo]', 'green');
     addActivityRow((isBurnAll ? '🔥 Whole vault burn' : 'Whole vault -> ' + share.addr) + ' [demo]', '');
-    return;
+    return true;
   }
 
   try {
@@ -6791,11 +6791,33 @@ async function dbMigrateAccount() {
   }
 
   try {
-    showNotif('Migrating account...', '');
+    showNotif('Checking account version on-chain...', '');
     const { PublicKey, Transaction, TransactionInstruction, SystemProgram } = solanaWeb3;
     const walletPubkey = new PublicKey(ghostState.publicKey);
     const ghostPda = new PublicKey(ghostState.ghostPda);
     const programId = new PublicKey(PROGRAM_ID);
+
+    // Verify on-chain account size — only migrate if actually needed
+    const _conn = new solanaWeb3.Connection(RPC_URL, 'confirmed');
+    const _acctInfo = await _conn.getAccountInfo(ghostPda);
+    if (!_acctInfo) { showNotif('Account not found on-chain', 'error'); return; }
+    const _onChainSize = _acctInfo.data.length;
+    const _onChainVersion = _onChainSize >= 1221 ? _acctInfo.data[1220] : 17;
+    if (_onChainVersion >= 18) {
+      // Already migrated — update local state and hide banner
+      ghostState.ghost._schemaVersion = 18;
+      ghostState.ghost._needsMigration = false;
+      ghostState._confirmedMigrated = true;
+      saveSession();
+      const _mb = document.getElementById('overviewMigrationBanner');
+      if (_mb) _mb.style.display = 'none';
+      const _mc = document.getElementById('migrationCard');
+      if (_mc) _mc.style.display = 'none';
+      enableAllVersionGatedFeatures();
+      showNotif('✅ Account is already on latest version!', 'green');
+      return;
+    }
+    showNotif('Migrating account...', '');
 
     // sha256("global:migrate_ghost")[0:8]
     // Anchor discriminator for migrate_ghost instruction.
