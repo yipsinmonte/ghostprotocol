@@ -44,7 +44,7 @@ const DISC = {
 };
 
 // GhostAccount account discriminator — sha256("account:GhostAccount")[0:8]
-const GHOST_ACCOUNT_DISC = Buffer.from([229, 196, 17, 162, 217, 230, 188, 115]);
+const GHOST_ACCOUNT_DISC = Buffer.from([159, 102, 98, 152, 27, 151, 132, 88]);
 
 const TOKEN_PROG_ADDR  = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const ASSOC_TOKEN_ADDR = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1bso';
