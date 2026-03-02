@@ -296,6 +296,15 @@ async function scanAndExecute() {
       ? ghost.awakenedAt + ghost.gracePeriodSeconds
       : null;
 
+    // ── Skip un-migrated v1.7 accounts ──────────────────────────────────────
+    // execute_transfer requires v1.8 struct layout (1221 bytes). v1.7 accounts
+    // (1220 bytes) will fail deserialization on-chain. Only the owner can migrate
+    // via the frontend — the bot cannot sign migrate_ghost on their behalf.
+    if (ghost.schemaVersion < 18) {
+      console.log(`  ⚠️  ${ghost.owner.slice(0,8)}... is v${ghost.schemaVersion} (un-migrated) — skipping, owner must migrate via frontend first`);
+      continue;
+    }
+
     // ── Case 1: Heartbeat expired, not yet awakened ───────────────────────────
     if (!ghost.awakened && !ghost.executed && nowSeconds > heartbeatExpiry + EXECUTION_BUFFER_SECONDS) {
       const overdueHours = Math.round((nowSeconds - heartbeatExpiry) / 3600);
