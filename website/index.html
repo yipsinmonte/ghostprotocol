@@ -2697,8 +2697,8 @@ const GHOST_DISC_LABELS = {
   '62419b9a15df8b60': '\u{1F6D1} Guardian cancelled & cleared',
   // v1.7 instructions
   '2449c74f69af7e35': '\u{1F464} Ghost name / profile updated',
-  '0067cb5e88e55731': '\u2699\uFE0F Heartbeat interval updated',
-  '074c82ba565d4286': '\u2699\uFE0F Grace period updated',
+  '0067cb5e88e55731': '\u2699\uFE0F Heartbeat interval updated + 💓 Heartbeat sent',
+  '074c82ba565d4286': '\u2699\uFE0F Grace period updated + 💓 Heartbeat sent',
 };
 // Discriminators that indicate a guardian action (for angel icon tagging)
 const GUARDIAN_DISCS = new Set([
@@ -2834,18 +2834,27 @@ async function fetchOnChainHistory() {
       const ts=((tx?.blockTime||s.blockTime)||0)*1000;
       if (!ts) continue;
       let label=labelFromTx(tx)||'\u{1F4CB} Ghost interaction';
-      // Check if this tx contains a guardian withdrawal disc
-      let rowIcon = null;
+      // Check ALL instructions for ping disc and guardian discs regardless of primary label.
+      // This catches bundled txs (e.g. update_interval + ping in same tx) where labelFromTx
+      // returns the settings label but the ping would otherwise be missed in history.
+      let rowIcon = null, hasBundledPing = false;
       try {
         const allIx = [...(tx?.transaction?.message?.instructions||[]), ...(tx?.meta?.innerInstructions||[]).flatMap(g=>g.instructions||[])];
         for (const ix of allIx) {
           if (ix.programId===PROGRAM_ID && ix.data) {
-            try { if (GUARDIAN_DISCS.has(b58ToDiscHex(ix.data))) { rowIcon='angel'; break; } } catch(_){}
+            try {
+              const hex = b58ToDiscHex(ix.data);
+              if (GUARDIAN_DISCS.has(hex)) rowIcon = 'angel';
+              // Ping found in a tx whose primary label is something else = bundled heartbeat
+              if (hex === 'ad005eec4985e199' && label !== '\u{1F493} Heartbeat sent') hasBundledPing = true;
+            } catch(_){}
           }
         }
       } catch(_) {}
       builtActivity.push({msg:label, tx:s.signature, ts, icon:rowIcon});
-      if (label==='\u{1F493} Heartbeat sent') rawPings.push({ts,sig:s.signature});
+      // Always record a ping entry if the tx contains a ping instruction,
+      // whether it's a standalone ping or bundled with a settings update
+      if (label === '\u{1F493} Heartbeat sent' || hasBundledPing) rawPings.push({ts, sig:s.signature});
     }
     const chronoPings=rawPings.sort((a,b)=>a.ts-b.ts);
     const builtPings=chronoPings.map((p,i)=>{
@@ -7997,6 +8006,7 @@ async function dbUpdateInterval() {
     document.getElementById('dbIntervalPreview').textContent = formatIntervalPreview(seconds, true);
     addActivityRow('⏱️ Heartbeat interval set to ' + formatIntervalLabel(seconds), sig.slice(0,4)+'...'+sig.slice(-4));
     addActivityRow('💓 Heartbeat sent with interval update', sig.slice(0,4)+'...'+sig.slice(-4));
+    addPingToHistory(sig.slice(0,4)+'...'+sig.slice(-4));
     showNotif('✅ Interval updated + heartbeat sent: ' + formatIntervalLabel(seconds), 'green');
     // Render immediately with known state, then re-sync from chain in background
     updateDashboardUI(); syncSettingsDisplay(); updateCountdown();
@@ -8067,6 +8077,7 @@ async function dbUpdateGrace() {
     document.getElementById('dbGracePreview').textContent = label;
     addActivityRow('⏳ Grace period set to ' + label, sig.slice(0,4)+'...'+sig.slice(-4));
     addActivityRow('💓 Heartbeat sent with grace update', sig.slice(0,4)+'...'+sig.slice(-4));
+    addPingToHistory(sig.slice(0,4)+'...'+sig.slice(-4));
     showNotif('✅ Grace period updated + heartbeat sent: ' + label, 'green');
     // Render immediately with known state, then re-sync from chain in background
     updateDashboardUI(); syncSettingsDisplay(); updateCountdown();
