@@ -1218,8 +1218,11 @@
                 <div style="font-family:'Share Tech Mono',monospace;font-size:13px;color:#b0a8d0">How long before your ghost awakens after silence</div>
               </div>
               <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
-                <input type="text" inputmode="numeric" id="initInterval" value="8760" style="width:90px;background:#07070f;border:1px solid rgba(102,51,255,0.25);color:#f0f0f8;font-family:'Syne',sans-serif;font-size:20px;font-weight:700;padding:8px 12px;outline:none;text-align:center" oninput="document.getElementById('initPreview').textContent=formatIntervalPreview(toSeconds(this.value,'hours'),true)">
-                <span style="font-family:'Share Tech Mono',monospace;font-size:13px;color:#b0a8d0">hours</span>
+<div class="unit-input-row" style="display:flex;align-items:stretch;border:1px solid rgba(102,51,255,0.25);overflow:hidden;background:#07070f">
+                  <input type="text" inputmode="numeric" id="initInterval" value="365" style="width:70px;background:transparent;border:none;color:#f0f0f8;font-family:'Syne',sans-serif;font-size:20px;font-weight:700;padding:8px 12px;outline:none;text-align:center" oninput="document.getElementById('initPreview').textContent=formatIntervalPreview(toSeconds(this.value,document.getElementById('initIntervalUnit').value),true)">
+                  <div style="width:1px;background:rgba(102,51,255,0.2);flex-shrink:0"></div>
+                  <select id="initIntervalUnit" onchange="document.getElementById('initPreview').textContent=formatIntervalPreview(toSeconds(document.getElementById('initInterval').value,this.value),true)" style="background:#07070f;border:none;color:#b0a8d0;font-family:'Share Tech Mono',monospace;font-size:13px;padding:8px 10px;outline:none;cursor:pointer;-webkit-appearance:auto;appearance:auto"><option value="hours">hours</option><option value="days" selected>days</option></select>
+                </div>
               </div>
             </div>
 
@@ -3605,10 +3608,11 @@ function validateStakeInput(el) {
 
 // ─── Initialize Ghost ────────────────────────────────────────────
 async function initializeGhost() {
-  const _initIntervalVal = parseFloat(document.getElementById('initInterval')?.value) || 8760;
+  const _initIntervalVal = parseFloat(document.getElementById('initInterval')?.value) || 365;
+  const _initIntervalUnit = document.getElementById('initIntervalUnit')?.value || 'days';
   const _initGraceVal = parseFloat(document.getElementById('initGrace')?.value ?? '0');
   const _initGraceUnit = document.getElementById('initGraceUnit')?.value || 'days';
-  const intervalHours = _initIntervalVal; // interval is always in hours on init form
+  const intervalHours = _initIntervalUnit === 'days' ? _initIntervalVal * 24 : _initIntervalVal;
   const intervalSeconds = Math.round(intervalHours * 3600);
   const graceSeconds = toSeconds(_initGraceVal, _initGraceUnit);
   const _isMigrationReg2 = ghostState.ghost._isMigration === true;
@@ -3792,7 +3796,7 @@ async function initializeGhost() {
     const signerAtaInfo = await connection.getAccountInfo(signerGhostAta);
     console.log('[Ghost] signerGhostAta exists:', !!signerAtaInfo);
 
-    showNotif((vaultTokens.length > 0 ? 'Step 2/2: ' : '') + 'Sign to close ghost and return stake...', '');
+    showNotif((ghostState.vaultTokens.length > 0 ? 'Step 2/2: ' : '') + 'Sign to close ghost and return stake...', '');
     const { blockhash } = await connection.getLatestBlockhash();
     const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPubkey });
     tx.add(ix);
@@ -6552,11 +6556,15 @@ async function dbAddRecoveryWallet() {
 
     // Discriminator: sha256("global:update_recovery_wallet")[0:8]
     const disc = [17, 163, 88, 154, 97, 78, 169, 93]; // sha256('global:update_recovery_wallet')[0:8]
-    // Args: recovery_wallet: Option<Pubkey>
-    const recoveryBytes = new Uint8Array(33);
-    recoveryBytes[0] = 1;
-    recoveryBytes.set(new PublicKey(addr).toBytes(), 1);
-    const data = new Uint8Array(8 + 33);
+    // Args: index: u8, wallet: Option<Pubkey>
+    // index = first available slot (0, 1, or 2)
+    const _usedSlots = (ghostState.recoveryWallets || []).length;
+    const _slotIndex = Math.min(_usedSlots, 2); // use next available slot, max 2
+    const recoveryBytes = new Uint8Array(34); // 1 index + 1 Some tag + 32 pubkey
+    recoveryBytes[0] = _slotIndex;             // index: u8
+    recoveryBytes[1] = 1;                      // Some tag
+    recoveryBytes.set(new PublicKey(addr).toBytes(), 2);
+    const data = new Uint8Array(8 + 34);
     data.set(disc, 0);
     data.set(recoveryBytes, 8);
 
@@ -6578,8 +6586,9 @@ async function dbAddRecoveryWallet() {
       console.log(`[Ghost] ix${i}: prog=${ix.programId.toBase58()} accounts=${ix.keys.length} data=${ix.data.length}b`)
     );
     const signed = await ghostState.provider.signTransaction(tx);
-    const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: true });
-    await connection.confirmTransaction(sig, 'confirmed');
+    const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' });
+    const conf = await connection.confirmTransaction(sig, 'confirmed');
+    if (conf.value?.err) throw new Error('TX failed on-chain: ' + JSON.stringify(conf.value.err));
 
     ghostState.recoveryWallets = [{ address: addr, canWithdraw }];
     ghostState.ghost.recoveryWallet = addr;
@@ -6609,10 +6618,11 @@ async function dbRemoveRecoveryWallet(idx) {
     const programId = new PublicKey(PROGRAM_ID);
 
     const disc = [17, 163, 88, 154, 97, 78, 169, 93]; // sha256('global:update_recovery_wallet')[0:8]
-    // Option::None = [0x00]
-    const data = new Uint8Array(9);
+    // Args: index: u8, wallet: Option<Pubkey> = None
+    const data = new Uint8Array(10); // 8 disc + 1 index + 1 None tag
     data.set(disc, 0);
-    data[8] = 0; // None
+    data[8] = idx;  // index: u8 — which slot to clear
+    data[9] = 0;    // None
 
     const ix = new TransactionInstruction({
       programId,
@@ -6632,8 +6642,9 @@ async function dbRemoveRecoveryWallet(idx) {
       console.log(`[Ghost] ix${i}: prog=${ix.programId.toBase58()} accounts=${ix.keys.length} data=${ix.data.length}b`)
     );
     const signed = await ghostState.provider.signTransaction(tx);
-    const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: true });
-    await connection.confirmTransaction(sig, 'confirmed');
+    const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' });
+    const conf = await connection.confirmTransaction(sig, 'confirmed');
+    if (conf.value?.err) throw new Error('TX failed on-chain: ' + JSON.stringify(conf.value.err));
 
     ghostState.recoveryWallets.splice(idx, 1);
     if (!ghostState.recoveryWallets.length) ghostState.ghost.recoveryWallet = null;
