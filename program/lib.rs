@@ -528,34 +528,41 @@ pub mod ghost_protocol {
         let ghost_info = ctx.accounts.ghost.to_account_info();
         let owner = ctx.accounts.ghost.owner;
         let clock = Clock::get()?;
-
-        // Record old size for the event (Anchor realloc has already run by this point)
-        // The constraint realloc'd to GHOST_ACCOUNT_SPACE + 1 before we enter here.
-        let new_len = ghost_info.data_len(); // should now be 1221
-
-        // Write schema_version = 18 at offset 1220 (the newly allocated byte)
+        let current_len = ghost_info.data_len();
+        let target_len = GHOST_ACCOUNT_SPACE + 1;
+        if current_len < target_len {
+            let rent = Rent::get()?;
+            let new_minimum = rent.minimum_balance(target_len);
+            let current_lamports = ghost_info.lamports();
+            if current_lamports < new_minimum {
+                let diff = new_minimum - current_lamports;
+                anchor_lang::system_program::transfer(
+                    CpiContext::new(
+                        ctx.accounts.system_program.to_account_info(),
+                        anchor_lang::system_program::Transfer {
+                            from: ctx.accounts.signer.to_account_info(),
+                            to: ghost_info.clone(),
+                        },
+                    ),
+                    diff,
+                )?;
+            }
+            ghost_info.realloc(target_len, false)?;
+        }
         {
             let mut data = ghost_info.try_borrow_mut_data()?;
-            // Safety: realloc guaranteed data is at least GHOST_ACCOUNT_SPACE + 1 bytes
             if data.len() > GHOST_ACCOUNT_SPACE {
                 data[GHOST_ACCOUNT_SPACE] = SCHEMA_VERSION_V18;
             }
         }
-
         emit!(MigrationComplete {
             soul: owner,
-            old_size: GHOST_ACCOUNT_SPACE as u16,  // what it was before realloc
-            new_size: new_len as u16,
+            old_size: current_len as u16,
+            new_size: target_len as u16,
             schema_version: SCHEMA_VERSION_V18,
             timestamp: clock.unix_timestamp,
         });
-
-        msg!(
-            "Ghost migrated to v1.8 for {} — {} bytes, schema_version={}",
-            owner,
-            new_len,
-            SCHEMA_VERSION_V18
-        );
+        msg!("Ghost migrated to v1.8 for {} — {} -> {} bytes, schema_version={}", owner, current_len, target_len, SCHEMA_VERSION_V18);
         Ok(())
     }
 }
@@ -820,15 +827,11 @@ pub struct AbandonGhost<'info> {
 /// system_program required by Anchor for realloc rent-exempt top-up.
 #[derive(Accounts)]
 pub struct MigrateGhost<'info> {
-    /// Ghost PDA — will be realloced from 1220 to 1221 bytes
     #[account(
         mut,
         seeds = [GHOST_SEED, signer.key().as_ref()],
         bump = ghost.bump,
         constraint = ghost.owner == signer.key() @ GhostError::Unauthorized,
-        realloc = GHOST_ACCOUNT_SPACE + 1,
-        realloc::payer = signer,
-        realloc::zero = false,
     )]
     pub ghost: Account<'info, GhostAccount>,
     #[account(mut)] pub signer: Signer<'info>,
