@@ -2939,8 +2939,14 @@ function parseGhostAccount(bytes) {
     const benefCount = bytes[offset];
     offset += 1;
 
-    ghostState.ghost.intervalSeconds = interval;
-    ghostState.ghost.gracePeriodSeconds = grace;
+    // ── Sanity guards: detect legacy/garbage layout ────────────────
+    const _validInterval = interval >= 3600 && interval <= 315360000;
+    const _validRegistered = registeredAt >= 1600000000 && registeredAt <= 2000000000;
+    const _validPingCount = pingCount <= 1000000;
+    const _validBenefCount = benefCount <= 10;
+
+    ghostState.ghost.intervalSeconds = _validInterval ? interval : null;
+    ghostState.ghost.gracePeriodSeconds = _validInterval ? grace : null;
     // Chain is authoritative — always use on-chain value when non-zero
     const chainHeartbeatMs = lastBeat * 1000;
     if (chainHeartbeatMs > 0) {
@@ -2951,9 +2957,9 @@ function parseGhostAccount(bytes) {
     ghostState.ghost.awakenedAt = awakenedAt ? awakenedAt * 1000 : null;
     ghostState.ghost.executed = executed;
     ghostState.ghost.stakedGhost = staked / 1_000_000; // convert from base units to token units
-    ghostState.ghost.pingCount = pingCount;
-    ghostState.ghost.beneficiaryCount = benefCount;
-    ghostState.ghost.registeredAt = registeredAt > 0 ? registeredAt * 1000 : null;
+    ghostState.ghost.pingCount = _validPingCount ? pingCount : 0;
+    ghostState.ghost.beneficiaryCount = _validBenefCount ? benefCount : 0;
+    ghostState.ghost.registeredAt = _validRegistered ? registeredAt * 1000 : null;
 
     // Decode beneficiaries[10] from chain — 75 bytes each:
     // recipient(32) + amount(u64=8) + token_mint(Option<Pubkey>=33) + action(u8=1) + executed(bool=1) = 75
@@ -2968,6 +2974,8 @@ function parseGhostAccount(bytes) {
     const _chainBenefs = [];
     for (let _bi = 0; _bi < 10; _bi++) {
       const recipBytes = bytes.slice(offset, offset + 32); offset += 32;
+      // Sanity: if beneficiary_count was garbage, skip all slots
+      if (!_validBenefCount) { offset += 8 + 1 + 1 + 1; continue; }
       const amtRaw = view.getBigUint64(offset, true); offset += 8;
       const mintTag = bytes[offset]; offset += 1;
       let mintPk = null;
@@ -2978,6 +2986,8 @@ function parseGhostAccount(bytes) {
       // Empty slot: no recipient AND no amount AND no mint
       const hasRecip = recipBytes.some(b => b !== 0);
       if (!hasRecip && amtRaw === 0n && !mintPk) continue;
+      // Sanity: all-zeros recipient with no valid mint = garbage/uninitialized
+      if (!hasRecip && !mintPk) continue;
       // Corrupt/default slot: recipient is all-zeros (system pubkey) or near-zero (base58 = 111...)
       // and no valid mint — these are uninitialized slots from failed/test transactions
       if (!mintPk && amtRaw === 0n) continue; // no mint, no amount — definitely empty
@@ -3199,13 +3209,17 @@ function updateDashboardUI() {
 
   // Interval / grace / registered display
   const intervalEl = document.getElementById('dbInterval');
-  if (intervalEl) intervalEl.textContent = formatIntervalLabel(g.intervalSeconds || 0);
+  if (intervalEl) intervalEl.textContent = g.intervalSeconds != null ? formatIntervalLabel(g.intervalSeconds) : 'Unknown';
   const graceEl = document.getElementById('dbGrace');
-  if (graceEl) graceEl.textContent = (g.gracePeriodSeconds || 0) === 0 ? 'Instant (0)' : Math.round(g.gracePeriodSeconds/86400) + ' days';
+  if (graceEl) graceEl.textContent = g.gracePeriodSeconds == null ? 'Unknown' : g.gracePeriodSeconds === 0 ? 'Instant (0)' : Math.round(g.gracePeriodSeconds/86400) + ' days';
   const regEl = document.getElementById('dbRegistered');
-  if (regEl && g.registeredAt) {
-    const d = new Date(g.registeredAt);
-    regEl.textContent = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  if (regEl) {
+    if (g.registeredAt) {
+      const d = new Date(g.registeredAt);
+      regEl.textContent = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } else {
+      regEl.textContent = 'Unknown';
+    }
   }
 
   // Awakening alert
@@ -6624,8 +6638,9 @@ async function dbMigrateAccount() {
     const _migCard = document.getElementById('migrationCard');
     if (_migCard) _migCard.style.display = 'none';
 
-    // Re-fetch to confirm new account size
+    // Re-fetch from chain and refresh UI — clears migration banner without page reload
     await fetchGhostAccount(ghostState.publicKey);
+    updateDashboardUI();
   } catch(err) {
     console.error('[Ghost] Migration error:', err);
     showNotif('Migration failed: ' + (err.message || err), 'error');
