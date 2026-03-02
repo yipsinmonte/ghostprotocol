@@ -1676,8 +1676,26 @@ async function fetchGhostCount() {
         }]
       })
     });
+    // Also fetch v1.8 accounts (1221 bytes)
+    const res18 = await fetch(RPC_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 2, method: 'getProgramAccounts',
+        params: [PROGRAM_ID, {
+          encoding: 'base64',
+          commitment: 'confirmed',
+          filters: [{ dataSize: 1221 }]
+        }]
+      })
+    });
     const data = await res.json();
-    const accounts = data?.result ?? [];
+    const data18 = await res18.json();
+    const seen = new Set();
+    const accounts = [];
+    for (const a of [...(data?.result ?? []), ...(data18?.result ?? [])]) {
+      if (!seen.has(a.pubkey)) { seen.add(a.pubkey); accounts.push(a); }
+    }
     const count = accounts.length;
     if (count > 0) {
       const el = document.getElementById('ghostCount');
@@ -3818,11 +3836,43 @@ async function initializeGhost() {
     ghostState.ghost.stakedGhost = Number(stakeRaw) / 1_000_000;
     ghostState.ghost.lastHeartbeat = Date.now();
     ghostState.ghost.pingCount = 0;
+    ghostState.ghost.registeredAt = Date.now();
     ghostState.ghost._isMigration = false;
 
     const _wasMigration = _isMigrationReg2 || _isMigrationReg;
-    showNotif(_wasMigration ? '✅ Ghost re-registered on-chain!' : '✅ Ghost initialized on-chain!', 'green');
+    showNotif(_wasMigration ? '✅ Ghost re-registered on-chain!' : '✅ Ghost initialized! Upgrading to v1.8...', 'green');
     addActivityRow(_wasMigration ? '🔄 Ghost re-registered (v1.7)' : '👻 Ghost initialized', sig.slice(0,4)+'...'+sig.slice(-4));
+
+    // Auto-migrate to v1.8 immediately after init — no confirm needed for fresh accounts
+    try {
+      const { SystemProgram: _SP } = solanaWeb3;
+      const _migDisc = new Uint8Array([233, 201, 87, 45, 9, 54, 200, 2]);
+      const _migIx = new solanaWeb3.TransactionInstruction({
+        programId: new solanaWeb3.PublicKey(PROGRAM_ID),
+        keys: [
+          { pubkey: new solanaWeb3.PublicKey(ghostState.ghostPda), isSigner: false, isWritable: true },
+          { pubkey: new solanaWeb3.PublicKey(ghostState.publicKey), isSigner: true, isWritable: true },
+          { pubkey: _SP.programId, isSigner: false, isWritable: false },
+        ],
+        data: _migDisc
+      });
+      const { blockhash: _migBh } = await connection.getLatestBlockhash();
+      const _migTx = new solanaWeb3.Transaction({ recentBlockhash: _migBh, feePayer: new solanaWeb3.PublicKey(ghostState.publicKey) });
+      _migTx.add(_migIx);
+      const _migSigned = await ghostState.provider.signTransaction(_migTx);
+      const _migSig = await connection.sendRawTransaction(_migSigned.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' });
+      const _migConf = await connection.confirmTransaction(_migSig, 'confirmed');
+      if (!_migConf.value?.err) {
+        ghostState.ghost._schemaVersion = 18;
+        ghostState.ghost._needsMigration = false;
+        addActivityRow('🔄 Ghost upgraded to v1.8', _migSig.slice(0,4)+'...'+_migSig.slice(-4));
+        showNotif('✅ Ghost initialized and upgraded to v1.8!', 'green');
+      }
+    } catch(_migErr) {
+      console.warn('[Ghost] Auto-migrate after init failed:', _migErr.message);
+      // Not fatal — user can manually migrate via the banner
+    }
+
     saveSession();
     updateDashboardUI();
     dbShowPage('overview', document.getElementById('nav-overview'));
