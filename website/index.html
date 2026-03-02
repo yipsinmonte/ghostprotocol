@@ -1177,7 +1177,7 @@
         <div class="db-form" style="border-color:rgba(255,61,90,0.2)">
           <div class="db-form-title" style="color:var(--red)">⚠️ Danger Zone</div>
           <div class="db-info" style="border-color:var(--red)"><strong>Abandon Ghost:</strong> Permanently closes your vault. Burns 50% of your staked $GHOST. Cannot be undone.</div>
-          <button class="db-btn db-btn-danger" onclick="dbAbandon()">💀 Abandon Ghost</button>
+          <button class="db-btn db-btn-danger" onclick="dbAbandonOnChain()">💀 Abandon Ghost</button>
         </div>
       </div>
 
@@ -2198,11 +2198,16 @@ async function connectWallet(name) {
     const wsEl = document.getElementById('walletStatus');
     if (wsEl) wsEl.textContent = ghostState.walletAddress + ' — Heartbeat Active';
     showNotif('\u2713 ' + name + ' connected!', 'green');
+    // Reset ghost state before fetching — ensures old profile never bleeds into new wallet
+    ghostState.ghost = { status:'none', lastHeartbeat:null, intervalSeconds:365*86400, gracePeriodSeconds:30*86400, awakenedAt:null, executed:false, stakedGhost:0, pingCount:0, vaultBalance:0, recoveryWallet:null, beneficiaries:[], wholeVaultAction:0 };
+    ghostState.walletTokens = [];
+    ghostState.vaultTokens = [];
+    ghostState.activityLog = [];
+    ghostState.pingHistory = [];
     saveSession();
     await fetchGhostAccount();
     setTimeout(() => {
       openDashboard();
-      if (ghostState.ghost.status !== 'none') dbShowPage('overview', document.getElementById('nav-overview'));
     }, 600);
   } catch (err) {
     console.error('Wallet connect error:', err);
@@ -3132,9 +3137,14 @@ function updateDashboardUI() {
     statusEl.className = 'db-status-badge status-' + g.status;
   }
 
-  // ── If no ghost: show init page, hide rest ───────────────────
+  // ── If no ghost: show init or overview (migration) ──────────
   if (isNone) {
-    dbShowPage('init', document.getElementById('nav-overview'));
+    if (isMigration) {
+      // Show overview with migration banner — not init form
+      dbShowPage('overview', document.getElementById('nav-overview'));
+    } else {
+      dbShowPage('init', document.getElementById('nav-overview'));
+    }
     // Keep overview nav highlighted
     document.querySelectorAll('.db-nav-item').forEach(n => n.classList.remove('active'));
     document.getElementById('nav-overview')?.classList.add('active');
@@ -6461,7 +6471,7 @@ async function dbMigrateAccount() {
   const _ok = await ghostConfirm({
     icon: '🔄',
     title: 'Migrate to v1.7',
-    message: 'This will close your current ghost account and open the registration form for a fresh v1.7 account. Your vault assets are NOT affected — they stay in the vault PDA. Proceed?',
+    message: 'This resets your local account state and opens the registration form. Your vault assets remain untouched on-chain. No $GHOST is burned. Proceed?',
     okLabel: 'MIGRATE', danger: true
   });
   if (!_ok) return;
@@ -7593,6 +7603,24 @@ async function dbUpdateGrace() {
 
 
 
+// ── On-chain Abandon Ghost (settings danger zone) ───────────────
+// NOTE: AbandonGhost on-chain instruction not yet implemented.
+// When ready: send AbandonGhost ix → vault closes, 50% GHOST burned, 50% returned.
+async function dbAbandonOnChain() {
+  const _ok = await ghostConfirm({
+    icon: '💀',
+    title: 'Abandon Ghost',
+    message: 'This permanently closes your vault on-chain. Burns 50% of your staked $GHOST. All vault assets returned to your wallet. CANNOT be undone.',
+    okLabel: 'ABANDON FOREVER', danger: true
+  });
+  if (!_ok) return;
+  showNotif('⚠️ On-chain abandon not yet available — coming soon.', 'error');
+  // TODO: build & send AbandonGhost instruction here
+  // Discriminator: sha256("global:abandon_ghost")[0:8]
+  // On success: reset state, show aftermath
+}
+
+// ── UI-only account reset (used for migration re-register) ───────
 async function dbAbandon(skipConfirm) {
   // Step 1: Confirmation modal
   const confirmed = skipConfirm ? true : await new Promise(resolve => {
@@ -7687,56 +7715,33 @@ async function dbAbandon(skipConfirm) {
   document.getElementById('nav-overview')?.classList.add('active');
 
   overviewPage.innerHTML = `
-    <div class="db-page-title">Ghost Abandoned</div>
-    <div class="db-page-sub">Your vault has been closed</div>
+    <div class="db-page-title">Account Reset</div>
+    <div class="db-page-sub">Ready to re-register</div>
     <div style="animation:aftermath-fade-in 0.8s ease-out both">
       <div style="background:rgba(102,51,255,0.04);border:1px solid rgba(102,51,255,0.15);border-radius:10px;padding:32px;margin-bottom:20px;text-align:center">
-        <div style="font-size:56px;margin-bottom:16px;opacity:0.4">👻</div>
-        <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:22px;color:#a060ff;margin-bottom:8px">Your ghost is gone</div>
+        <div style="font-size:56px;margin-bottom:16px;opacity:0.6">👻</div>
+        <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:22px;color:#a060ff;margin-bottom:8px">Ghost account cleared</div>
         <div style="font-family:'Share Tech Mono',monospace;font-size:13px;color:#7060a0;line-height:1.7">
-          The vault has been closed on-chain.<br>No assets were distributed to beneficiaries.
-        </div>
-      </div>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
-        <div style="background:rgba(255,61,90,0.06);border:1px solid rgba(255,61,90,0.2);border-radius:8px;padding:20px;text-align:center">
-          <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:rgba(255,96,128,0.6);margin-bottom:6px;letter-spacing:0.1em">BURNED FOREVER</div>
-          <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:20px;color:#ff6080">${burnedAmt.toLocaleString()} $GHOST</div>
-          <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#ff6080;margin-top:4px;opacity:0.6">50% penalty</div>
-        </div>
-        <div style="background:rgba(102,51,255,0.06);border:1px solid rgba(102,51,255,0.2);border-radius:8px;padding:20px;text-align:center">
-          <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:rgba(160,96,255,0.6);margin-bottom:6px;letter-spacing:0.1em">RETURNED TO WALLET</div>
-          <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:20px;color:#a060ff">${returnedAmt.toLocaleString()} $GHOST</div>
-          <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#a060ff;margin-top:4px;opacity:0.6">50% recovered</div>
-        </div>
-      </div>
-
-      <div style="background:rgba(102,51,255,0.04);border:1px solid rgba(102,51,255,0.1);border-radius:8px;padding:20px;margin-bottom:20px">
-        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:#b0a8d0;margin-bottom:12px">What happened on-chain</div>
-        <div style="font-family:'Share Tech Mono',monospace;font-size:12px;color:#6050a0;line-height:2">
-          <span style="color:#a060ff">✓</span> Vault PDA closed — rent lamports returned<br>
-          <span style="color:#ff6080">✓</span> ${burnedAmt.toLocaleString()} $GHOST sent to burn address<br>
-          <span style="color:#a060ff">✓</span> ${returnedAmt.toLocaleString()} $GHOST returned to your wallet<br>
-          <span style="color:#a060ff">✓</span> All vault assets (SOL, SPL tokens) returned to your wallet<br>
-          <span style="color:#6050a0">✗</span> No beneficiary transfers executed
+          Your local account state has been reset.<br>Your vault assets are untouched on-chain.<br>Register a new ghost account to continue.
         </div>
       </div>
 
       <div style="text-align:center">
         <button onclick="dbSummonNew()" style="background:rgba(102,51,255,0.15);border:1px solid rgba(102,51,255,0.4);color:#a060ff;padding:12px 32px;border-radius:8px;cursor:pointer;font-family:'Syne',sans-serif;font-weight:700;font-size:15px;transition:all 0.2s" onmouseover="this.style.background='rgba(102,51,255,0.25)'" onmouseout="this.style.background='rgba(102,51,255,0.15)'">
-          👻 Summon a New Ghost
+          👻 Register New Ghost
         </button>
       </div>
     </div>`;
 
-  // Helper to restart
+  // Helper to restart — go straight to init form without reload
   window.dbSummonNew = function() {
-    // Clear all session data so fresh load doesn't re-parse stale account
-    try { sessionStorage.clear(); localStorage.removeItem('ghostSession'); } catch(_) {}
-    ghostState.ghost = { status: 'none', stakedGhost: 0, pingCount: 0, beneficiaries: [], wholeVaultShares: [] };
+    ghostState.ghost = { status:'none', lastHeartbeat:null, intervalSeconds:365*86400, gracePeriodSeconds:30*86400, awakenedAt:null, executed:false, stakedGhost:0, pingCount:0, vaultBalance:0, recoveryWallet:null, beneficiaries:[], wholeVaultAction:0 };
+    ghostState.walletTokens = [];
+    ghostState.vaultTokens = [];
     ghostState.activityLog = [];
+    ghostState.pingHistory = [];
     saveSession();
-    location.reload();
+    updateDashboardUI();
   };
 }
 </script>
