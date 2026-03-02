@@ -1677,7 +1677,7 @@ async function fetchGhostCount() {
             params: [PROGRAM_ID, {
               encoding: 'base64',
               commitment: 'confirmed',
-              dataSlice: { offset: 0, length: 160 }, // enough for header + interval field
+              dataSlice: { offset: 0, length: 200 }, // enough for header + interval field (worst case: 3 recovery wallets = offset ~155)
               filters: [{ dataSize: size }]
             }]
           })
@@ -1688,6 +1688,7 @@ async function fetchGhostCount() {
     };
 
     const [accts17, accts18] = await Promise.all([fetchSize(1220), fetchSize(1221)]);
+    console.log('[Ghost] gPA results — v1.7:', accts17.length, 'v1.8:', accts18.length);
     const seen = new Set();
     const accounts = [];
     for (const a of [...accts17, ...accts18]) {
@@ -1730,11 +1731,9 @@ async function fetchGhostCount() {
       const el = document.getElementById('avgHeartbeat');
       if (el) el.textContent = avgDays + 'd';
       console.log('[Ghost] Avg heartbeat:', avgDays, 'days from', validCount, 'accounts');
-    } else if (ghostState.ghost?.intervalSeconds > 0) {
-      // Fallback: show connected user's own interval if gPA returned no parseable data
-      const days = Math.round(ghostState.ghost.intervalSeconds / 86400);
-      const el = document.getElementById('avgHeartbeat');
-      if (el && days >= 1) el.textContent = days + 'd';
+    } else {
+      // gPA returned no parseable accounts — leave as '—'
+      console.log('[Ghost] avgHeartbeat: no valid accounts from gPA, showing —');
     }
   } catch(e) { console.log('[Ghost] ghostCount fetch failed', e); }
 }
@@ -1794,6 +1793,8 @@ function saveSession() {
       vaultPda: ghostState.vaultPda,
       ghostStakeVault: ghostState.ghostStakeVault || null,
       lastPage: _currentPage || 'overview',
+      wasInDashboard: ghostState._wasInDashboard || false,
+      recoveryMeta: ghostState.recoveryMeta || {},
     };
     localStorage.setItem(key, JSON.stringify(s));
     localStorage.setItem('ghostLastWallet', ghostState.publicKey || ghostState.walletAddress || '');
@@ -1819,6 +1820,8 @@ function loadSession() {
     if (s.ghostPda) ghostState.ghostPda = s.ghostPda;
     if (s.vaultPda) ghostState.vaultPda = s.vaultPda;
     if (s.ghostStakeVault) ghostState.ghostStakeVault = s.ghostStakeVault;
+    if (s.wasInDashboard) ghostState._wasInDashboard = s.wasInDashboard;
+    if (s.recoveryMeta) ghostState.recoveryMeta = s.recoveryMeta;
     return s.lastPage || 'overview';
   } catch(e) { return false; }
 }
@@ -2925,7 +2928,13 @@ function parseGhostAccount(bytes) {
   // this offset calculation will need to change. schema_version must always be last.
   const _schemaVersion = bytes.length >= 1221 ? bytes[1220] : 17;
   ghostState.ghost._schemaVersion = _schemaVersion;
-  ghostState.ghost._needsMigration = _schemaVersion < 18; // gate: bump to 19 for next version
+  // Only set _needsMigration=true from chain — never override a confirmed false
+  // (avoids RPC staleness re-showing banner after successful migrate tx)
+  if (_schemaVersion < 18) {
+    ghostState.ghost._needsMigration = true;
+  } else {
+    ghostState.ghost._needsMigration = false;
+  }
 
   // GhostAccount field layout — Borsh encoding rules:
   //   Option<T>::None = 1 byte (0x00 tag only)
@@ -3197,11 +3206,18 @@ function parseGhostAccount(bytes) {
       _countEl.textContent = _tr + (_wv > 0 ? 1 : 0);
     }
 
-    // Populate recovery wallet from on-chain state if present
+    // Populate recovery wallets from on-chain state, merging with local meta (notes, canWithdraw)
     const _chainWallets = recoveryWallets.filter(w => w !== null);
     if (_chainWallets.length > 0) {
-      ghostState.recoveryWallets = _chainWallets.map(addr => ({ address: addr, canWithdraw: false }));
+      const _meta = ghostState.recoveryMeta || {};
+      ghostState.recoveryWallets = _chainWallets.map(addr => ({
+        address: addr,
+        canWithdraw: _meta[addr]?.canWithdraw || false,
+        note: _meta[addr]?.note || '',
+      }));
       renderRecoveryWallets();
+    } else {
+      ghostState.recoveryWallets = [];
     }
     
   } catch (err) {
@@ -3905,6 +3921,8 @@ function openDashboard() {
 function closeDashboard() {
   document.getElementById('dashboardPanel').classList.remove('open');
   document.body.style.overflow = '';
+  ghostState._wasInDashboard = false;
+  saveSession();
 }
 
 async function disconnectWallet() {
@@ -6573,8 +6591,14 @@ function renderRecoveryWallets() {
               <input type="checkbox" checked disabled style="accent-color:#33ff99"> Cancel awakening
             </label>
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-family:'Share Tech Mono',monospace;font-size:12px;color:${w.canWithdraw ? 'var(--amber)' : 'var(--muted)'}">
-              <input type="checkbox" ${w.canWithdraw ? 'checked' : ''} onchange="toggleRecoveryWithdraw(${i}, this.checked)" style="accent-color:#ffb830;cursor:pointer"> Vault withdrawals
+              <input type="checkbox" ${w.canWithdraw ? 'checked' : ''} onchange="toggleRecoveryWithdraw(${i}, this.checked)" style="accent-color:#ffb830;cursor:pointer"> Vault withdrawals <span style="font-size:10px;color:#6060a0">(local)</span>
             </label>
+          </div>
+          <div style="margin-top:10px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <input type="text" value="${(w.note||'').replace(/"/g,'&quot;')}" placeholder="Note — saved locally (e.g. cold wallet, hardware key)…" oninput="saveRecoveryNote(${i}, this.value)" style="flex:1;background:rgba(102,51,255,0.06);border:1px solid rgba(102,51,255,0.18);color:#c0bce0;font-family:'Share Tech Mono',monospace;font-size:11px;padding:6px 10px;outline:none">
+              <span style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#6060a0;white-space:nowrap">💾 local</span>
+            </div>
           </div>
         </div>
         <button class="db-btn db-btn-danger" style="padding:7px 14px;font-size:11px;flex-shrink:0" onclick="dbRemoveRecoveryWallet(${i})">🗑️ Remove</button>
@@ -6599,9 +6623,14 @@ async function dbAddRecoveryWallet() {
 
   // Demo mode
   if (!ghostState.provider || ghostState.walletName?.includes('demo')) {
-    ghostState.recoveryWallets = [{ address: addr, canWithdraw }];
+    if (!ghostState.recoveryMeta) ghostState.recoveryMeta = {};
+    ghostState.recoveryMeta[addr] = { canWithdraw, note: '' };
+    if (!ghostState.recoveryWallets.find(w => w.address === addr)) {
+      ghostState.recoveryWallets.push({ address: addr, canWithdraw, note: '' });
+    }
     ghostState.ghost.recoveryWallet = addr;
     document.getElementById('dbNewRecovery').value = '';
+    saveSession();
     renderRecoveryWallets();
     showNotif('✅ Recovery wallet set [demo]', 'green');
     return;
@@ -6651,11 +6680,20 @@ async function dbAddRecoveryWallet() {
     const conf = await connection.confirmTransaction(sig, 'confirmed');
     if (conf.value?.err) throw new Error('TX failed on-chain: ' + JSON.stringify(conf.value.err));
 
-    ghostState.recoveryWallets = [{ address: addr, canWithdraw }];
+    // Append to local array (not replace) and save meta
+    if (!ghostState.recoveryMeta) ghostState.recoveryMeta = {};
+    ghostState.recoveryMeta[addr] = { canWithdraw, note: '' };
+    // Append only if not already present
+    if (!ghostState.recoveryWallets.find(w => w.address === addr)) {
+      ghostState.recoveryWallets.push({ address: addr, canWithdraw, note: '' });
+    }
     ghostState.ghost.recoveryWallet = addr;
     document.getElementById('dbNewRecovery').value = '';
+    saveSession();
     renderRecoveryWallets();
     showNotif('✅ Recovery wallet set on-chain!', 'green');
+    // Re-fetch from chain after delay to confirm state
+    setTimeout(() => fetchGhostAccount().catch(() => {}), 2500);
   } catch(err) {
     showNotif('Failed: ' + (err.message || err), 'error');
   }
@@ -6707,10 +6745,13 @@ async function dbRemoveRecoveryWallet(idx) {
     const conf = await connection.confirmTransaction(sig, 'confirmed');
     if (conf.value?.err) throw new Error('TX failed on-chain: ' + JSON.stringify(conf.value.err));
 
-    ghostState.recoveryWallets.splice(idx, 1);
+    const removed = ghostState.recoveryWallets.splice(idx, 1)[0];
+    if (removed?.address && ghostState.recoveryMeta) delete ghostState.recoveryMeta[removed.address];
     if (!ghostState.recoveryWallets.length) ghostState.ghost.recoveryWallet = null;
+    saveSession();
     renderRecoveryWallets();
     showNotif('Recovery wallet removed on-chain', 'green');
+    setTimeout(() => fetchGhostAccount().catch(() => {}), 2500);
   } catch(err) {
     showNotif('Failed: ' + (err.message || err), 'error');
   }
@@ -6823,6 +6864,11 @@ async function dbMigrateAccount() {
 
 function toggleRecoveryWithdraw(idx, val) {
   ghostState.recoveryWallets[idx].canWithdraw = val;
+  const addr = ghostState.recoveryWallets[idx].address;
+  if (!ghostState.recoveryMeta) ghostState.recoveryMeta = {};
+  if (!ghostState.recoveryMeta[addr]) ghostState.recoveryMeta[addr] = {};
+  ghostState.recoveryMeta[addr].canWithdraw = val;
+  saveSession();
   showNotif(val ? '⚠️ Withdrawal rights granted' : 'Withdrawal rights revoked', val ? 'info' : 'info');
 }
 
@@ -6888,6 +6934,16 @@ function enableAllVersionGatedFeatures() {
 
 // Legacy stubs for old calls
 function dbUpdateRecovery() { dbAddRecoveryWallet(); }
+
+function saveRecoveryNote(idx, note) {
+  if (!ghostState.recoveryWallets[idx]) return;
+  ghostState.recoveryWallets[idx].note = note;
+  const addr = ghostState.recoveryWallets[idx].address;
+  if (!ghostState.recoveryMeta) ghostState.recoveryMeta = {};
+  if (!ghostState.recoveryMeta[addr]) ghostState.recoveryMeta[addr] = {};
+  ghostState.recoveryMeta[addr].note = note;
+  saveSession();
+}
 function dbRemoveRecovery() { if (ghostState.recoveryWallets.length) dbRemoveRecoveryWallet(0); }
 
 // ─── Copyable addresses ─────────────────────────────────────────
