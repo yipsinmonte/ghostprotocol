@@ -413,8 +413,6 @@ async function ensureRecipientAta(ownerPk, mintPk, tokenProg) {
   // createAssociatedTokenAccountIdempotent instruction format (v2 ATA program):
   // discriminator = 1 (u8), keys below
   const SYSTEM_PROG = new PublicKey('11111111111111111111111111111111');
-  const SYSVAR_RENT = new PublicKey('SysvarRent111111111111111111111111111111111');
-
   const ix = new TransactionInstruction({
     programId: assocTokenPk,
     keys: [
@@ -425,7 +423,7 @@ async function ensureRecipientAta(ownerPk, mintPk, tokenProg) {
       { pubkey: SYSTEM_PROG,     isSigner: false, isWritable: false }, // system program
       { pubkey: tokenProg,       isSigner: false, isWritable: false }, // token program (SPL or Token-2022)
     ],
-    data: Buffer.from([1]), // 1 = createIdempotent
+    data: Buffer.alloc(0), // standard create (empty) — idempotent variant [1] fails on Helius
   });
 
   try {
