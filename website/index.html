@@ -848,6 +848,17 @@
           </button>
         </div>
 
+        <!-- Execution detail panel — shown only for executed ghosts, populated by renderExecutionDetail() -->
+        <div id="dbExecutionDetail" style="display:none;margin-bottom:20px;border:1px solid rgba(255,51,102,0.2);background:rgba(255,51,102,0.04);border-radius:4px;overflow:hidden">
+          <div style="padding:14px 18px;border-bottom:1px solid rgba(255,51,102,0.15);display:flex;align-items:center;justify-content:space-between">
+            <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:13px;color:#ff3366;letter-spacing:0.06em">💀 EXECUTION REPORT</div>
+            <div id="dbExecDetailTime" style="font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(255,100,130,0.6)"></div>
+          </div>
+          <div id="dbExecDetailBody" style="padding:0">
+            <div style="padding:16px 18px;font-family:'Share Tech Mono',monospace;font-size:12px;color:#c0bce0">Loading execution details...</div>
+          </div>
+        </div>
+
         <div class="status-hero">
           <div>
             <div class="status-eyebrow">Current Status</div>
@@ -2765,6 +2776,13 @@ const GHOST_DISC_LABELS = {
   // recovery wallet + migration
   '11a3589a614ea95d': '\u{1F511} Recovery wallet updated',
   'e9c9572d0936c802': '\u{1F504} Account migrated to v1.8',
+  // bot execution instructions
+  'ca3ef808ddc9e69e': '⏰ Silence detected — Ghost awakened',
+  '4740f97b68dcbc90': '💀 Ghost executed (protocol)',
+  'e97ea0b8ebce1f77': '📤 Token transfer executed',
+  'ea3081dc28de3a9f': '🔥 Token burn executed',
+  '345d3184612eda0d': '📤 Whole vault transfer executed',
+  '59da97947864b51c': '🔥 Whole vault burn executed',
 };
 // Discriminators that indicate a guardian action (for angel icon tagging)
 const GUARDIAN_DISCS = new Set([
@@ -2918,6 +2936,50 @@ async function fetchOnChainHistory() {
         const _fps = typeof _fp === 'string' && _fp.length > 8 ? _fp.slice(0,4)+'...'+_fp.slice(-4) : '';
         return 'Guardian Withdrawal' + (_fps ? ' · by ' + _fps : '');
       }
+      // Execute transfer — decode beneficiary index + enrich with token/recipient from ghost state
+      if (matchIx && matchHex === 'e97ea0b8ebce1f77') {
+        try {
+          // ix data: disc(8) + bene_index(1)
+          const B58e='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+          let leading_e=0; for(const ch of matchIx.data){if(ch==='1')leading_e++;else break;}
+          let num_e=0n; for(const ch of matchIx.data.slice(leading_e)){const i=B58e.indexOf(ch);if(i<0)break;num_e=num_e*58n+BigInt(i);}
+          const bytes_e=[]; while(num_e>0n){bytes_e.unshift(Number(num_e&0xffn));num_e>>=8n;}
+          const full_e=[...new Array(leading_e).fill(0),...bytes_e];
+          const bIdx = full_e[8];
+          const bene = (ghostState.ghost?.beneficiaries||[])[bIdx];
+          if (bene) {
+            const shortR = bene.fullAddr ? bene.fullAddr.slice(0,4)+'...'+bene.fullAddr.slice(-4) : (bene.recipient||'');
+            return `📤 Transfer executed · ${bene.amount||''} ${bene.token||''} → ${shortR}`;
+          }
+        } catch(_) {}
+        return '📤 Token transfer executed';
+      }
+      // Execute burn — similar structure
+      if (matchIx && matchHex === 'ea3081dc28de3a9f') {
+        try {
+          const B58b='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+          let leading_b=0; for(const ch of matchIx.data){if(ch==='1')leading_b++;else break;}
+          let num_b=0n; for(const ch of matchIx.data.slice(leading_b)){const i=B58b.indexOf(ch);if(i<0)break;num_b=num_b*58n+BigInt(i);}
+          const bytes_b=[]; while(num_b>0n){bytes_b.unshift(Number(num_b&0xffn));num_b>>=8n;}
+          const full_b=[...new Array(leading_b).fill(0),...bytes_b];
+          const bIdxB = full_b[8];
+          const beneB = (ghostState.ghost?.beneficiaries||[])[bIdxB];
+          if (beneB) return `🔥 Burn executed · ${beneB.amount||''} ${beneB.token||''} → 🔥`;
+        } catch(_) {}
+        return '🔥 Token burn executed';
+      }
+      // Whole vault transfer — show recipient from ghost state
+      if (matchHex === '345d3184612eda0d') {
+        const wvr = ghostState.ghost?.wholeVaultRecipient;
+        if (wvr) {
+          const shortWv = wvr.slice(0,4)+'...'+wvr.slice(-4);
+          return `📤 Whole vault transfer · → ${shortWv}`;
+        }
+        return '📤 Whole vault transfer executed';
+      }
+      if (matchHex === '59da97947864b51c') return '🔥 Whole vault burn executed';
+      if (matchHex === '4740f97b68dcbc90') return '💀 Ghost executed by protocol';
+      if (matchHex === 'ca3ef808ddc9e69e') return '⏰ Silence detected — Ghost awakened by bot';
       return baseLabel;
     }
     const builtActivity=[], rawPings=[];
@@ -3444,12 +3506,28 @@ function updateDashboardUI() {
   if (orbWrap) orbWrap.style.opacity = isExecuted ? '0.2' : '1';
   if (orbWrap) orbWrap.style.pointerEvents = isExecuted ? 'none' : '';
   if (orbLabel) orbLabel.style.opacity = isExecuted ? '0.2' : '1';
-  // Grey out heartbeat nav tab
-  const hbNavEl = document.getElementById('nav-heartbeat');
-  if (hbNavEl) {
-    hbNavEl.style.opacity = isExecuted ? '0.35' : '';
-    hbNavEl.style.pointerEvents = isExecuted ? 'none' : '';
-    hbNavEl.title = isExecuted ? 'Ghost has been executed — heartbeats no longer active' : '';
+
+  // Executed: gray out tabs no longer relevant — watcher (Heartbeat Checker) has no ID so stays accessible for guardian withdrawal
+  const execLockedIds = ['nav-vault','nav-beneficiaries','nav-heartbeat','nav-recovery','nav-settings'];
+  execLockedIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (isExecuted) {
+      el.style.opacity = '0.3';
+      el.style.pointerEvents = 'none';
+      el.title = 'Ghost has been executed — this section is no longer active';
+    } else {
+      el.style.opacity = '';
+      el.style.pointerEvents = '';
+      el.title = '';
+    }
+  });
+
+  // Show/hide execution detail panel
+  const execDetailEl = document.getElementById('dbExecutionDetail');
+  if (execDetailEl) {
+    execDetailEl.style.display = isExecuted ? 'block' : 'none';
+    if (isExecuted) renderExecutionDetail();
   }
 
   // Update grace period countdown
@@ -4228,7 +4306,7 @@ function dbShowPage(pageId, navEl) {
   if (pageId === 'settings') syncSettingsDisplay();
   if (pageId === 'recovery') renderRecoveryWallets();
   if (pageId === 'heartbeat') renderPingHistory();
-  if (pageId === 'overview') { renderVaultOverview(); renderPingHistory(); renderActivityLog(); renderBeneficiaries(); }
+  if (pageId === 'overview') { renderVaultOverview(); renderPingHistory(); renderActivityLog(); renderBeneficiaries(); if (ghostState.ghost?.status === 'executed') renderExecutionDetail(); }
   if (pageId === 'vault') { loadWalletTokens().then(() => { renderVaultHoldings(); renderVaultOverview(); }).catch(() => {}); }
 }
 
@@ -4391,6 +4469,132 @@ function addActivityRow(msg, tx, icon) {
   const ts = Date.now();
   ghostState.activityLog.unshift({ msg, tx: tx||'', ts, _local: true, icon: icon||null });
   renderActivityLog();
+}
+
+function renderExecutionDetail() {
+  const body = document.getElementById('dbExecDetailBody');
+  const timeEl = document.getElementById('dbExecDetailTime');
+  if (!body) return;
+
+  const g = ghostState.ghost;
+  const log = ghostState.activityLog || [];
+
+  // Find execute-related transactions from activity log
+  const execDiscs = new Set([
+    '4740f97b68dcbc90', // execute_legacy
+    'e97ea0b8ebce1f77', // execute_transfer
+    'ea3081dc28de3a9f', // execute_burn
+    '345d3184612eda0d', // execute_whole_vault_transfer
+    '59da97947864b51c', // execute_whole_vault_burn
+    'ca3ef808ddc9e69e', // check_silence
+  ]);
+
+  const execEvents = log.filter(e =>
+    e.msg && (
+      e.msg.includes('executed') || e.msg.includes('transfer executed') ||
+      e.msg.includes('burn executed') || e.msg.includes('Silence detected') ||
+      e.msg.includes('Whole vault')
+    )
+  );
+
+  // Build beneficiary summary from ghost state
+  const benes = g.beneficiaries || [];
+  const wholeRecipient = g.wholeVaultRecipient;
+  const wholeAction = g.wholeVaultAction;
+
+  let html = '';
+
+  // Whole vault section
+  if (wholeRecipient) {
+    const actionLabel = wholeAction === 1 ? '🔥 Burned' : '📤 Transferred to';
+    const shortRecip = wholeRecipient.length > 8 ? wholeRecipient.slice(0,4)+'...'+wholeRecipient.slice(-4) : wholeRecipient;
+    html += `<div style="padding:14px 18px;border-bottom:1px solid rgba(255,51,102,0.08)">
+      <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.12em;color:rgba(255,100,130,0.5);margin-bottom:8px">WHOLE VAULT DISTRIBUTION</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:18px">${wholeAction === 1 ? '🔥' : '📤'}</span>
+        <div>
+          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:13px;color:#f0f0f8">${actionLabel}</div>
+          <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#c0bce0;margin-top:2px">
+            <span title="${wholeRecipient}">${shortRecip}</span>
+          </div>
+        </div>
+        <div style="margin-left:auto">
+          <span style="font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.12em;padding:3px 8px;background:rgba(51,255,153,0.1);border:1px solid rgba(51,255,153,0.3);color:#33ff99">COMPLETE</span>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Individual beneficiaries
+  const transfers = benes.filter(b => b.action !== 'whole-vault-share' && b.action !== 'burn');
+  const burns = benes.filter(b => b.action === 'burn');
+
+  if (transfers.length > 0) {
+    html += `<div style="padding:14px 18px 6px;border-bottom:1px solid rgba(255,51,102,0.08)">
+      <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.12em;color:rgba(255,100,130,0.5);margin-bottom:10px">BENEFICIARY TRANSFERS</div>`;
+    for (const b of transfers) {
+      const isPaid = b.executed || b._fromChain && b.executed;
+      const shortRecip = b.fullAddr ? (b.fullAddr.length > 8 ? b.fullAddr.slice(0,4)+'...'+b.fullAddr.slice(-4) : b.fullAddr) : (b.recipient || '—');
+      const amt = b.amount ? b.amount.toLocaleString(undefined,{maximumFractionDigits:6}) : '—';
+      html += `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.03)">
+        <span style="font-size:14px">📤</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#f0f0f8">${amt} <span style="color:#a080ff">${b.token || '?'}</span></div>
+          <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#6868a0;margin-top:1px" title="${b.fullAddr || ''}">${shortRecip}</div>
+        </div>
+        <span style="font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;padding:2px 7px;${isPaid
+          ? 'background:rgba(51,255,153,0.1);border:1px solid rgba(51,255,153,0.3);color:#33ff99'
+          : 'background:rgba(255,153,51,0.1);border:1px solid rgba(255,153,51,0.3);color:#ff9933'
+        }">${isPaid ? 'SENT' : 'PENDING'}</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (burns.length > 0) {
+    html += `<div style="padding:14px 18px 6px;border-bottom:1px solid rgba(255,51,102,0.08)">
+      <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.12em;color:rgba(255,100,130,0.5);margin-bottom:10px">BURNS</div>`;
+    for (const b of burns) {
+      const isPaid = b.executed;
+      const amt = b.amount ? b.amount.toLocaleString(undefined,{maximumFractionDigits:6}) : '—';
+      html += `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.03)">
+        <span style="font-size:14px">🔥</span>
+        <div style="flex:1">
+          <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#f0f0f8">${amt} <span style="color:#a080ff">${b.token || '?'}</span></div>
+          <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#6868a0;margin-top:1px">burned · sent to null address</div>
+        </div>
+        <span style="font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;padding:2px 7px;${isPaid
+          ? 'background:rgba(255,51,102,0.1);border:1px solid rgba(255,51,102,0.3);color:#ff3366'
+          : 'background:rgba(255,153,51,0.1);border:1px solid rgba(255,153,51,0.3);color:#ff9933'
+        }">${isPaid ? 'BURNED' : 'PENDING'}</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  // Stake reminder
+  if (g.stakedGhost > 0) {
+    html += `<div style="padding:12px 18px;display:flex;align-items:center;gap:10px;background:rgba(102,51,255,0.04)">
+      <span style="font-size:14px">💎</span>
+      <div style="flex:1">
+        <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#a080ff">${g.stakedGhost.toLocaleString()} $GHOST staked</div>
+        <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#6868a0;margin-top:1px">Locked in stake vault — reclaim via Abandon Ghost (50% burn)</div>
+      </div>
+      <span style="font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;padding:2px 7px;background:rgba(102,51,255,0.1);border:1px solid rgba(102,51,255,0.3);color:#a080ff">LOCKED</span>
+    </div>`;
+  }
+
+  if (!html) {
+    html = `<div style="padding:16px 18px;font-family:'Share Tech Mono',monospace;font-size:12px;color:#6868a0">No execution details available — refresh to load from chain.</div>`;
+  }
+
+  body.innerHTML = html;
+
+  // Set timestamp from most recent exec event
+  if (execEvents.length > 0 && timeEl) {
+    const latest = Math.max(...execEvents.map(e => e.ts || 0));
+    if (latest > 0) timeEl.textContent = new Date(latest).toLocaleDateString(undefined, {month:'short',day:'numeric',year:'numeric'});
+  }
 }
 
 function renderActivityLog() {
