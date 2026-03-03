@@ -3056,9 +3056,11 @@ function parseGhostAccount(bytes) {
     if (hasAwakenedAt) offset += 8;
     // executed: bool
     const executed = bytes[offset] === 1;
+    console.log('[Ghost] offset at executed:', offset, 'byte:', bytes[offset], 'awakened:', awakened, 'awakenedAt:', awakenedAt, 'executed:', executed);
     offset += 1;
     // executed_at: Option<i64> — variable Borsh: None=1 byte, Some=9 bytes
     const exTag = bytes[offset]; offset += 1;
+    console.log('[Ghost] exTag:', exTag, 'offset after exTag:', offset);
     if (exTag === 1) offset += 8;
     // staked_ghost: u64
     const staked = Number(view.getBigUint64(offset, true));
