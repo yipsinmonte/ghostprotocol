@@ -843,7 +843,7 @@
             Your ghost account has been executed by the protocol bot. All vault assets have been (or are being) distributed to your beneficiaries.<br>
             Your staked <strong id="dbExecutedStake">—</strong> $GHOST remains locked in the stake vault — only you can reclaim it via <em>Abandon Ghost</em> (50% burn applies).
           </div>
-          <button class="db-btn" onclick="openAbandonModal()" style="background:rgba(255,51,102,0.15);border:1px solid rgba(255,51,102,0.4);color:#ff3366;font-size:11px;padding:6px 16px;letter-spacing:0.08em">
+          <button class="db-btn" onclick="dbAbandonOnChain()" style="background:rgba(255,51,102,0.15);border:1px solid rgba(255,51,102,0.4);color:#ff3366;font-size:11px;padding:6px 16px;letter-spacing:0.08em">
             👻 ABANDON GHOST &amp; RECLAIM STAKE
           </button>
         </div>
@@ -8424,10 +8424,14 @@ async function dbAbandonOnChain() {
   const burnAmt = Math.floor(staked * 0.5).toLocaleString();
   const returnAmt = Math.ceil(staked * 0.5).toLocaleString();
 
+  const _isExecuted = ghostState.ghost.status === 'executed';
+  const _vaultNote = _isExecuted
+    ? 'Vault assets have already been distributed by the protocol.'
+    : 'Vault assets remain in vault — withdraw them first if needed.';
   const _ok = await ghostConfirm({
     icon: '💀',
     title: 'Abandon Ghost',
-    message: `This permanently closes your ghost on-chain.\n\nBurns ${burnAmt} $GHOST (50% of stake).\nReturns ${returnAmt} $GHOST to your wallet.\nVault assets remain in vault — withdraw them first if needed.\n\nCANNOT be undone.`,
+    message: `This permanently closes your ghost on-chain.\n\nBurns ${burnAmt} $GHOST (50% of stake).\nReturns ${returnAmt} $GHOST to your wallet.\n${_vaultNote}\n\nCANNOT be undone.`,
     okLabel: 'ABANDON FOREVER', danger: true
   });
   if (!_ok) return;
