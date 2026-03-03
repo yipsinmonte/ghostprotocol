@@ -2193,7 +2193,18 @@ async function connectWallet(name) {
       try { await provider.disconnect(); } catch(e) {}
       throw new Error('Authentication cancelled — approve the sign request to connect.');
     }
-    // Sign succeeded — update state and UI
+    // Sign succeeded — clear ALL old state before updating to new wallet
+    ghostState.ghost = { status:'none', lastHeartbeat:null, intervalSeconds:365*86400, gracePeriodSeconds:30*86400, awakenedAt:null, executed:false, stakedGhost:0, pingCount:0, vaultBalance:0, recoveryWallet:null, beneficiaries:[], wholeVaultAction:0 };
+    ghostState.walletTokens = [];
+    ghostState.vaultTokens = [];
+    ghostState.activityLog = [];
+    ghostState.pingHistory = [];
+    ghostState.recoveryWallets = [];
+    ghostState.selectedTokens = {};
+    ghostState.ghostPda = null;
+    ghostState.vaultPda = null;
+    ghostState.ghostStakeVault = null;
+    // Now set new wallet identity
     ghostState.connected = true;
     ghostState.walletName = name;
     ghostState.walletAddress = pubkey.slice(0,4) + '...' + pubkey.slice(-4);
@@ -2208,6 +2219,11 @@ async function connectWallet(name) {
       ghostState.vaultTokens = [];
       ghostState.activityLog = [];
       ghostState.pingHistory = [];
+      ghostState.recoveryWallets = [];
+      ghostState.selectedTokens = {};
+      ghostState.ghostPda = null;
+      ghostState.vaultPda = null;
+      ghostState.ghostStakeVault = null;
       // If new pubkey provided, derive new PDAs and reload
       if (newPubkey) {
         const pk = typeof newPubkey === 'string' ? newPubkey : newPubkey?.toBase58?.() || '';
@@ -2239,14 +2255,10 @@ async function connectWallet(name) {
     const wsEl = document.getElementById('walletStatus');
     if (wsEl) wsEl.textContent = ghostState.walletAddress + ' — Heartbeat Active';
     showNotif('\u2713 ' + name + ' connected!', 'green');
-    // Reset ghost state before fetching — ensures old profile never bleeds into new wallet
-    ghostState.ghost = { status:'none', lastHeartbeat:null, intervalSeconds:365*86400, gracePeriodSeconds:30*86400, awakenedAt:null, executed:false, stakedGhost:0, pingCount:0, vaultBalance:0, recoveryWallet:null, beneficiaries:[], wholeVaultAction:0 };
-    ghostState.walletTokens = [];
-    ghostState.vaultTokens = [];
-    ghostState.activityLog = [];
-    ghostState.pingHistory = [];
     saveSession();
     await fetchGhostAccount();
+    updateDashboardUI();
+    await loadWalletTokens().catch(()=>{});
     setTimeout(() => {
       openDashboard();
     }, 600);
