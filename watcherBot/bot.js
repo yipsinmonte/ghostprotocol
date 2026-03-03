@@ -459,7 +459,7 @@ async function ensureRecipientTokenAccount(ownerPk, mintPk, tokenProg) {
       buf.writeUInt32LE(0, 0); // CreateAccount = 0
       buf.writeBigUInt64LE(BigInt(lamports), 4);
       buf.writeBigUInt64LE(BigInt(space), 12);
-      tokenProg.toBytes().copy(buf, 20);
+      Buffer.from(tokenProg.toBytes()).copy(buf, 20);
       return buf;
     })(),
   };
@@ -467,7 +467,7 @@ async function ensureRecipientTokenAccount(ownerPk, mintPk, tokenProg) {
   // InitializeAccount3: opcode 18, then owner pubkey (32 bytes)
   const initData = Buffer.alloc(33);
   initData[0] = 18;
-  ownerPk.toBytes().copy(initData, 1);
+  Buffer.from(ownerPk.toBytes()).copy(initData, 1);
   const initIx = new TransactionInstruction({
     programId: tokenProg,
     keys: [
