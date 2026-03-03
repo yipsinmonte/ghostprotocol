@@ -400,36 +400,62 @@ async function buildExecuteWholeVaultBurn(ghost, mintPk, tokenProg, vaultAtaPk) 
 // Returns true if ATA exists or was created, false on failure.
 async function ensureRecipientAta(ownerPk, mintPk, tokenProg) {
   const ata = deriveATA(ownerPk, mintPk, tokenProg);
+  console.log(`    [ata] checking ${ata.toBase58().slice(0,8)}... for owner ${ownerPk.toBase58().slice(0,8)}... mint ${mintPk.toBase58().slice(0,8)}...`);
   try {
     const info = await connection.getAccountInfo(ata);
-    if (info) return true; // already exists
+    if (info) { console.log(`    [ata] already exists`); return true; }
   } catch (_) {}
 
-  console.log(`    [ata] creating token account for ${ownerPk.toBase58().slice(0,8)}... mint ${mintPk.toBase58().slice(0,8)}...`);
+  console.log(`    [ata] creating... ATA=${ata.toBase58()} owner=${ownerPk.toBase58()} mint=${mintPk.toBase58()} tokenProg=${tokenProg.toBase58().slice(0,8)}...`);
 
-  // createAssociatedTokenAccountIdempotent (data=[1]) — safe to call even if exists
-  // Keys: funder, ata, owner, mint, system_program, token_program
+  // Use @solana/spl-token if available, otherwise build manually
+  // ATA program: ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1bso
+  // createAssociatedTokenAccountIdempotent instruction format (v2 ATA program):
+  // discriminator = 1 (u8), keys below
   const SYSTEM_PROG = new PublicKey('11111111111111111111111111111111');
   const SYSVAR_RENT = new PublicKey('SysvarRent111111111111111111111111111111111');
+
   const ix = new TransactionInstruction({
     programId: assocTokenPk,
     keys: [
-      { pubkey: botKp.publicKey, isSigner: true,  isWritable: true  }, // funder
-      { pubkey: ata,             isSigner: false, isWritable: true  }, // ata
-      { pubkey: ownerPk,         isSigner: false, isWritable: false }, // wallet owner
-      { pubkey: mintPk,          isSigner: false, isWritable: false }, // mint
+      { pubkey: botKp.publicKey, isSigner: true,  isWritable: true  }, // funding account
+      { pubkey: ata,             isSigner: false, isWritable: true  }, // associated token account
+      { pubkey: ownerPk,         isSigner: false, isWritable: false }, // wallet address
+      { pubkey: mintPk,          isSigner: false, isWritable: false }, // token mint
       { pubkey: SYSTEM_PROG,     isSigner: false, isWritable: false }, // system program
-      { pubkey: tokenProg,       isSigner: false, isWritable: false }, // token program
-      { pubkey: SYSVAR_RENT,     isSigner: false, isWritable: false }, // rent sysvar
+      { pubkey: tokenProg,       isSigner: false, isWritable: false }, // token program (SPL or Token-2022)
     ],
-    data: Buffer.from([1]), // 1 = createIdempotent variant
+    data: Buffer.from([1]), // 1 = createIdempotent
   });
 
-  const sig = await sendTx([ix], `createATA(${ownerPk.toBase58().slice(0,8)}... ${mintPk.toBase58().slice(0,8)}...)`);
-  if (!sig) return false;
-  // Wait for RPC to see the new account before proceeding
-  await sleep(2000);
-  return true;
+  try {
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    const tx = new Transaction({ recentBlockhash: blockhash, feePayer: botKp.publicKey });
+    tx.add(ix);
+    tx.sign(botKp);
+
+    // Simulate first to get full error detail
+    const sim = await connection.simulateTransaction(tx);
+    if (sim.value.err) {
+      console.error(`    [ata] ❌ simulate failed: ${JSON.stringify(sim.value.err)}`);
+      console.error(`    [ata] logs:
+${(sim.value.logs || []).join('
+')}`);
+      return false;
+    }
+
+    const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true });
+    await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+    console.log(`    [ata] ✅ created: ${sig}`);
+    await sleep(2000);
+    return true;
+  } catch (err) {
+    const logs = err?.logs?.join('
+') || '';
+    console.error(`    [ata] ❌ create failed: ${err.message || JSON.stringify(err)}
+${logs}`);
+    return false;
+  }
 }
 
 // ─── Ghost processing ─────────────────────────────────────────────────────────
