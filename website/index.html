@@ -2225,8 +2225,20 @@ async function connectWallet(name) {
       ghostState.vaultPda = null;
       ghostState.ghostStakeVault = null;
       // If new pubkey provided, derive new PDAs and reload
-      if (newPubkey) {
-        const pk = typeof newPubkey === 'string' ? newPubkey : newPubkey?.toBase58?.() || '';
+      // Phantom sometimes fires accountChanged with null/undefined when switching back to a prev account
+      // Fall back to reading provider.publicKey directly
+      const resolvedPk = (() => {
+        if (newPubkey) {
+          const s = typeof newPubkey === 'string' ? newPubkey : newPubkey?.toBase58?.() || '';
+          if (s) return s;
+        }
+        return provider.publicKey?.toBase58?.() || '';
+      })();
+      // If same wallet as before — no-op (tab switch / focus restore)
+      if (resolvedPk && resolvedPk === ghostState.publicKey) return;
+
+      if (resolvedPk) {
+        const pk = resolvedPk;
         if (pk) {
           ghostState.publicKey = pk;
           ghostState.walletAddress = pk.slice(0,4)+'...'+pk.slice(-4);
@@ -2248,7 +2260,8 @@ async function connectWallet(name) {
           return;
         }
       }
-      disconnectWallet();
+      // Could not resolve new pubkey — do nothing (tab switch, focus restore, etc.)
+      // Never auto-disconnect on ambiguous accountChanged events
     };
     ghostState._onAccountChange = _onAccountChange; // store ref for visibility check
     try { provider.off?.('accountChanged', _onAccountChange); provider.on?.('accountChanged', _onAccountChange); } catch(e) {}
