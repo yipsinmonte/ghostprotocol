@@ -2708,6 +2708,7 @@ async function fetchGhostAccount() {
     for (let i = 0; i < rawData.length; i++) bytes[i] = rawData.charCodeAt(i);
     
     parseGhostAccount(bytes);
+    console.log('[Ghost] after parseGhostAccount, status:', ghostState.ghost.status);
 
     // RAW BYTE DUMP — remove after debugging
     (function() {
@@ -3266,6 +3267,7 @@ function parseGhostAccount(bytes) {
     if (executed) ghostState.ghost.status = 'executed';
     else if (awakened) ghostState.ghost.status = 'awakened';
     else ghostState.ghost.status = 'alive';
+    console.log('[Ghost] parseGhostAccount FINAL status:', ghostState.ghost.status, 'executed:', executed, 'awakened:', awakened);
 
     // Show migration card if account is v1.7 (exactly 1220 bytes, not yet migrated to v1.8)
     const _migCard = document.getElementById('migrationCard');
