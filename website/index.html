@@ -837,6 +837,17 @@
           </div>
         </div>
 
+        <div class="db-alert" id="dbExecutedAlert" style="display:none;border-color:rgba(255,51,102,0.4);background:rgba(255,51,102,0.08)">
+          <div style="color:#ff3366;font-weight:700;letter-spacing:0.08em;margin-bottom:6px">💀 GHOST EXECUTED — Legacy protocol has run</div>
+          <div style="font-size:12px;color:rgba(255,180,180,0.8);line-height:1.6;margin-bottom:10px">
+            Your ghost account has been executed by the protocol bot. All vault assets have been (or are being) distributed to your beneficiaries.<br>
+            Your staked <strong id="dbExecutedStake">—</strong> $GHOST remains locked in the stake vault — only you can reclaim it via <em>Abandon Ghost</em> (50% burn applies).
+          </div>
+          <button class="db-btn" onclick="openAbandonModal()" style="background:rgba(255,51,102,0.15);border:1px solid rgba(255,51,102,0.4);color:#ff3366;font-size:11px;padding:6px 16px;letter-spacing:0.08em">
+            👻 ABANDON GHOST &amp; RECLAIM STAKE
+          </button>
+        </div>
+
         <div class="status-hero">
           <div>
             <div class="status-eyebrow">Current Status</div>
@@ -2709,7 +2720,6 @@ async function fetchGhostAccount() {
     for (let i = 0; i < rawData.length; i++) bytes[i] = rawData.charCodeAt(i);
     
     parseGhostAccount(bytes);
-    console.log('[Ghost] after parseGhostAccount, status:', ghostState.ghost.status);
 
     // RAW BYTE DUMP — remove after debugging
     (function() {
@@ -3058,11 +3068,9 @@ function parseGhostAccount(bytes) {
     if (hasAwakenedAt) offset += 8;
     // executed: bool
     const executed = bytes[offset] === 1;
-    console.log('[Ghost] offset at executed:', offset, 'byte:', bytes[offset], 'awakened:', awakened, 'awakenedAt:', awakenedAt, 'executed:', executed);
     offset += 1;
     // executed_at: Option<i64> — variable Borsh: None=1 byte, Some=9 bytes
     const exTag = bytes[offset]; offset += 1;
-    console.log('[Ghost] exTag:', exTag, 'offset after exTag:', offset);
     if (exTag === 1) offset += 8;
     // staked_ghost: u64
     const staked = Number(view.getBigUint64(offset, true));
@@ -3268,7 +3276,7 @@ function parseGhostAccount(bytes) {
     if (executed) ghostState.ghost.status = 'executed';
     else if (awakened) ghostState.ghost.status = 'awakened';
     else ghostState.ghost.status = 'alive';
-    console.log('[Ghost] parseGhostAccount FINAL status:', ghostState.ghost.status, 'executed:', executed, 'awakened:', awakened);
+
 
     // Show migration card if account is v1.7 (exactly 1220 bytes, not yet migrated to v1.8)
     const _migCard = document.getElementById('migrationCard');
@@ -3418,6 +3426,16 @@ function updateDashboardUI() {
   // Awakening alert
   const alert = document.getElementById('dbAwakeningAlert');
   if (alert) alert.style.display = g.status === 'awakened' ? 'block' : 'none';
+
+  // Executed alert
+  const execAlert = document.getElementById('dbExecutedAlert');
+  if (execAlert) {
+    execAlert.style.display = g.status === 'executed' ? 'block' : 'none';
+    if (g.status === 'executed') {
+      const stakeEl = document.getElementById('dbExecutedStake');
+      if (stakeEl) stakeEl.textContent = (g.stakedGhost || 0).toLocaleString();
+    }
+  }
 
   // Update grace period countdown
   const graceCountdownEl = document.getElementById('dbGraceCountdown');
