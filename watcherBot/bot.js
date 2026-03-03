@@ -192,13 +192,40 @@ async function sendTx(instructions, label) {
     console.log(`    ✅ ${label}: ${sig}`);
     return sig;
   } catch (err) {
-    const detail = err?.logs ? '\n' + err.logs.join('\n') : err.message;
-    console.error(`    ❌ ${label} failed:`, detail);
+    const logs = err?.logs ? '\n' + err.logs.join('\n') : '';
+    const msg = err?.message || err?.toString() || JSON.stringify(err);
+    console.error(`    ❌ ${label} failed: ${msg}${logs}`);
     return null;
   }
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Like sendTx but skips preflight — needed for ATA creation which fails preflight on Helius
+async function sendTxSkipPreflight(instructions, label) {
+  try {
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    const tx = new Transaction({ recentBlockhash: blockhash, feePayer: botKp.publicKey });
+    tx.add(...instructions);
+    tx.sign(botKp);
+    const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true });
+    const result = await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+    if (result.value && result.value.err) {
+      // Fetch logs from confirmed tx
+      const txInfo = await connection.getTransaction(sig, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+      const logs = txInfo?.meta?.logMessages ? '\n' + txInfo.meta.logMessages.join('\n') : ' (no logs)';
+      console.error(`    ❌ ${label} on-chain err: ${JSON.stringify(result.value.err)}${logs}`);
+      return null;
+    }
+    console.log(`    ✅ ${label}: ${sig}`);
+    return sig;
+  } catch (err) {
+    const logs = err?.logs ? '\n' + err.logs.join('\n') : '';
+    const msg = err?.message || err?.toString() || JSON.stringify(err);
+    console.error(`    ❌ ${label} failed: ${msg}${logs}`);
+    return null;
+  }
+}
 
 // ─── On-chain verification helpers ───────────────────────────────────────────
 
@@ -421,7 +448,7 @@ async function ensureRecipientAta(ownerPk, mintPk, tokenProg) {
     data: Buffer.alloc(0), // standard create — idempotent [1] rejected by Helius
   });
 
-  const sig = await sendTx([ix], `createATA(${mintPk.toBase58().slice(0,8)}...)`);
+  const sig = await sendTxSkipPreflight([ix], `createATA(${mintPk.toBase58().slice(0,8)}...)`);
   if (!sig) return false;
   await sleep(2000); // let RPC propagate before transfer tx
   return true;
