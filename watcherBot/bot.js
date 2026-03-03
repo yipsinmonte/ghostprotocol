@@ -671,7 +671,7 @@ async function runBeneficiaries(ghost, label, now) {
       }
     }
 
-    // Log staked ghost reminder — owner must call abandon_ghost to reclaim
+    // Log staked ghost reminder — owner must call abandon_ghost to reclaim 
     if (ghost.stakedGhost > 0) {
       const stakeFormatted = (ghost.stakedGhost / 1_000_000).toLocaleString();
       console.log(`    [stake] ${stakeFormatted} $GHOST remains in stake_vault — owner must call abandon_ghost to reclaim (50% burn penalty applies)`);
