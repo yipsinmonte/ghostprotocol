@@ -1,20 +1,22 @@
 /**
- * GHOST Protocol — Executor Bot v1.8
+ * GHOST Protocol — Executor Bot v1.9
  *
  * Execution flow per overdue ghost:
  *   1. check_silence      — awakens ghost + pays 5% bounty to bot's $GHOST ATA
- *   2. Wait for grace period to expire (bot re-checks on next poll — does NOT execute early)
+ *   2. Wait for grace period to expire (bot re-checks on next poll)
  *   3. execute_legacy     — marks ghost.executed = true (permissionless)
- *   4. Per beneficiary:
- *        action=0 → execute_transfer
- *        action=1 → execute_burn
- *   5. If whole_vault_recipient set:
- *        action=0 → execute_whole_vault_transfer
- *        action=1 → execute_whole_vault_burn
+ *   4. Per beneficiary (action=0 → transfer, action=1 → burn)
+ *        → verify on-chain: re-fetch beneficiary.executed flag after tx
+ *   5. Whole vault: enumerate ALL vault token accounts via getTokenAccountsByOwner,
+ *        run execute_whole_vault_transfer/burn per mint with balance > 0
+ *        → verify on-chain: re-fetch vault token account balance after tx
  *
- * GRACE PERIOD SAFETY: bot checks Date.now()/1000 > awakenedAt + gracePeriodSeconds
- * before EVER calling execute_legacy or any transfer/burn. On-chain enforces this too
- * (GracePeriodActive error) but we guard client-side to avoid wasting SOL.
+ * NOTE: Staked $GHOST (ghost_stake_vault) is NOT touched by the bot.
+ *       Only the owner can reclaim/burn stake via abandon_ghost.
+ *       The bot logs remaining stake for awareness.
+ *
+ * GRACE PERIOD SAFETY: bot checks unix timestamp > awakenedAt + gracePeriodSeconds
+ *   before EVER calling execute_legacy or transfers. On-chain enforces this too.
  */
 
 require('dotenv').config();
@@ -31,9 +33,12 @@ const PROGRAM_ID      = process.env.PROGRAM_ID  || '3Es13GXc4qwttE6uSgAAfi1zvBD3
 const BOT_KEYPAIR_B58 = process.env.BOT_KEYPAIR;
 const GHOST_MINT_ADDR = process.env.GHOST_MINT  || 'k4MxJAdy22Dgd2UTQ9p3etbnaSLUH1q5cEfSRi6pump';
 
-const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const POLL_INTERVAL_MS  = 5 * 60 * 1000; // 5 minutes
+const VERIFY_DELAY_MS   = 3000;           // wait 3s after confirm before verifying
+const VERIFY_RETRY_MS   = 6000;           // retry delay if verify fails
+const VERIFY_RETRIES    = 2;              // max re-fetch attempts
 
-// Anchor discriminators — sha256("global:<name>")[0:8]
+// Anchor discriminators — sha256("global:<n>")[0:8]
 const DISC = {
   check_silence:                Buffer.from([202,  62, 248,   8, 221, 201, 230, 158]),
   execute_legacy:               Buffer.from([ 71,  64, 249, 123, 104, 220, 188, 144]),
@@ -43,27 +48,27 @@ const DISC = {
   execute_whole_vault_burn:     Buffer.from([ 89, 218, 151, 148, 120, 100, 181,  28]),
 };
 
-// GhostAccount account discriminator — sha256("account:GhostAccount")[0:8]
+// GhostAccount discriminator — sha256("account:GhostAccount")[0:8]
 const GHOST_ACCOUNT_DISC = Buffer.from([159, 102, 98, 152, 27, 151, 132, 88]);
 
 const TOKEN_PROG_ADDR   = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-const TOKEN22_PROG_ADDR = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'; // Token-2022 (pump.fun)
+const TOKEN22_PROG_ADDR = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 const ASSOC_TOKEN_ADDR  = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1bso';
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
 
 if (!BOT_KEYPAIR_B58) { console.error('❌ BOT_KEYPAIR env var not set.'); process.exit(1); }
 
-const botKp        = Keypair.fromSecretKey(bs58.decode(BOT_KEYPAIR_B58));
-const connection   = new Connection(RPC_URL,    'confirmed');
-const gpaConn      = new Connection(GPA_RPC_URL,'confirmed');
-const programIdPk  = new PublicKey(PROGRAM_ID);
-const ghostMintPk  = new PublicKey(GHOST_MINT_ADDR);
-const tokenProgPk  = new PublicKey(TOKEN_PROG_ADDR);
+const botKp         = Keypair.fromSecretKey(bs58.decode(BOT_KEYPAIR_B58));
+const connection    = new Connection(RPC_URL,     'confirmed');
+const gpaConn       = new Connection(GPA_RPC_URL, 'confirmed');
+const programIdPk   = new PublicKey(PROGRAM_ID);
+const ghostMintPk   = new PublicKey(GHOST_MINT_ADDR);
+const tokenProgPk   = new PublicKey(TOKEN_PROG_ADDR);
 const token22ProgPk = new PublicKey(TOKEN22_PROG_ADDR);
-const assocTokenPk = new PublicKey(ASSOC_TOKEN_ADDR);
+const assocTokenPk  = new PublicKey(ASSOC_TOKEN_ADDR);
 
-console.log('👻 GHOST Executor Bot starting...');
+console.log('👻 GHOST Executor Bot v1.9 starting...');
 console.log('   Program:', PROGRAM_ID);
 console.log('   Bot wallet:', botKp.publicKey.toBase58());
 console.log('   RPC (tx):', RPC_URL);
@@ -72,11 +77,24 @@ console.log('   Polling every', POLL_INTERVAL_MS / 60000, 'minutes\n');
 
 // ─── PDA / ATA helpers ───────────────────────────────────────────────────────
 
-const deriveGhostPda  = (ownerPk) => PublicKey.findProgramAddressSync([Buffer.from('ghost'), ownerPk.toBytes()], programIdPk);
-const deriveVaultPda  = (ownerPk) => PublicKey.findProgramAddressSync([Buffer.from('vault'), ownerPk.toBytes()], programIdPk);
-const deriveStakeVault= (ownerPk) => PublicKey.findProgramAddressSync([Buffer.from('stake_vault'), ownerPk.toBytes()], programIdPk);
-const deriveATA       = (walletPk, mintPk, tpk = tokenProgPk) =>
+const deriveGhostPda   = (ownerPk) => PublicKey.findProgramAddressSync([Buffer.from('ghost'),       ownerPk.toBytes()], programIdPk);
+const deriveVaultPda   = (ownerPk) => PublicKey.findProgramAddressSync([Buffer.from('vault'),       ownerPk.toBytes()], programIdPk);
+const deriveStakeVault = (ownerPk) => PublicKey.findProgramAddressSync([Buffer.from('stake_vault'), ownerPk.toBytes()], programIdPk);
+const deriveATA        = (walletPk, mintPk, tpk = tokenProgPk) =>
   PublicKey.findProgramAddressSync([walletPk.toBytes(), tpk.toBytes(), mintPk.toBytes()], assocTokenPk)[0];
+
+// ─── Token program resolver ───────────────────────────────────────────────────
+
+const _mintProgCache = new Map();
+async function resolveTokenProgram(mintPk) {
+  const key = mintPk.toBase58();
+  if (_mintProgCache.has(key)) return _mintProgCache.get(key);
+  const info = await connection.getAccountInfo(mintPk);
+  if (!info) throw new Error(`Mint not found: ${key}`);
+  const prog = info.owner.toBase58() === TOKEN22_PROG_ADDR ? token22ProgPk : tokenProgPk;
+  _mintProgCache.set(key, prog);
+  return prog;
+}
 
 // ─── Account parser ───────────────────────────────────────────────────────────
 
@@ -96,20 +114,18 @@ function parseGhost(pubkeyStr, data) {
 
     const awakened = data[o] === 1; o += 1;
 
-    // awakened_at: Option<i64>
     const hasAwakenedAt = data[o] === 1; o += 1;
     const awakenedAt    = hasAwakenedAt ? Number(view.getBigInt64(o, true)) : null;
     if (hasAwakenedAt) o += 8;
 
     const executed = data[o] === 1; o += 1;
 
-    // executed_at: Option<i64>
     const hasExecutedAt = data[o] === 1; o += 1;
     if (hasExecutedAt) o += 8;
 
-    o += 8; // staked_ghost
-    const bump      = data[o]; o += 1;
-    const vaultBump = data[o]; o += 1;
+    const stakedGhost = Number(view.getBigUint64(o, true)); o += 8;
+    const bump        = data[o]; o += 1;
+    const vaultBump   = data[o]; o += 1;
     o += 8; // registered_at
     o += 8; // ping_count
 
@@ -124,8 +140,8 @@ function parseGhost(pubkeyStr, data) {
       const mTag      = data[o]; o += 1;
       const tokenMint = mTag === 1 ? new PublicKey(data.slice(o, o + 32)).toBase58() : null;
       if (mTag === 1) o += 32;
-      const action    = data[o]; o += 1;
-      const bExec     = data[o] === 1; o += 1;
+      const action  = data[o]; o += 1;
+      const bExec   = data[o] === 1; o += 1;
       if (i < beneficiaryCount) beneficiaries.push({ recipient, amount, tokenMint, action, executed: bExec });
     }
 
@@ -142,13 +158,11 @@ function parseGhost(pubkeyStr, data) {
 
     const wholeVaultAction = data[o]; o += 1;
 
-    // Sanity guard — catches offset drift / garbage parse on v1.7 accounts
-    const MIN_IV = 3600;           // 1 hour (program minimum)
-    const MAX_IV = 365 * 24 * 3600; // 1 year
-    const MIN_HB = 1_600_000_000;  // ~Solana mainnet launch
-    const MAX_HB = 2_000_000_000;  // ~2033
+    // Sanity guards
+    const MIN_IV = 3600, MAX_IV = 365 * 24 * 3600;
+    const MIN_HB = 1_600_000_000, MAX_HB = 2_000_000_000;
     if (intervalSeconds < MIN_IV || intervalSeconds > MAX_IV) {
-      console.warn(`  ⚠️  ${pubkeyStr.slice(0,8)}... implausible interval (${intervalSeconds}s) — skipping (v1.7 parse drift)`);
+      console.warn(`  ⚠️  ${pubkeyStr.slice(0,8)}... implausible interval (${intervalSeconds}s) — skipping`);
       return null;
     }
     if (lastHeartbeat < MIN_HB || lastHeartbeat > MAX_HB) {
@@ -157,7 +171,7 @@ function parseGhost(pubkeyStr, data) {
     }
 
     return { pubkey: pubkeyStr, owner, lastHeartbeat, intervalSeconds, gracePeriodSeconds,
-             awakened, awakenedAt, executed, bump, vaultBump,
+             awakened, awakenedAt, executed, stakedGhost, bump, vaultBump,
              beneficiaryCount, beneficiaries, wholeVaultRecipient, wholeVaultAction, paused };
   } catch (err) {
     console.warn('  ⚠️  Parse failed for', pubkeyStr, '—', err.message);
@@ -184,127 +198,114 @@ async function sendTx(instructions, label) {
   }
 }
 
-// ─── Instruction builders ─────────────────────────────────────────────────────
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// Resolve the token program for a given mint by reading its on-chain owner
-// (same approach as the frontend — avoids hardcoding Token vs Token-2022)
-async function resolveTokenProgram(mintPk) {
-  const info = await connection.getAccountInfo(mintPk);
-  if (!info) throw new Error(`Mint account not found: ${mintPk.toBase58()}`);
-  const owner = info.owner.toBase58();
-  if (owner === TOKEN22_PROG_ADDR) return token22ProgPk;
-  return tokenProgPk; // default to standard SPL
+// ─── On-chain verification helpers ───────────────────────────────────────────
+
+// After execute_transfer: re-fetch ghost account and check beneficiary[index].executed === true
+async function verifyBeneficiaryPaid(ghostPubkey, index, retries = VERIFY_RETRIES) {
+  await sleep(VERIFY_DELAY_MS);
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const info = await connection.getAccountInfo(new PublicKey(ghostPubkey));
+      if (!info) { console.warn(`    ⚠️  verify[${index}]: ghost account not found`); return false; }
+      const fresh = parseGhost(ghostPubkey, new Uint8Array(info.data));
+      if (!fresh) { console.warn(`    ⚠️  verify[${index}]: parse failed`); return false; }
+      const b = fresh.beneficiaries[index];
+      if (!b) { console.warn(`    ⚠️  verify[${index}]: beneficiary not in parsed data`); return false; }
+      if (b.executed) {
+        console.log(`    ✔  verify[${index}]: confirmed on-chain executed=true`);
+        return true;
+      }
+      if (attempt < retries) {
+        console.warn(`    ⚠️  verify[${index}]: not yet marked executed (attempt ${attempt+1}/${retries+1}) — retrying in ${VERIFY_RETRY_MS/1000}s`);
+        await sleep(VERIFY_RETRY_MS);
+      }
+    } catch (err) {
+      console.warn(`    ⚠️  verify[${index}]: fetch error — ${err.message}`);
+      if (attempt < retries) await sleep(VERIFY_RETRY_MS);
+    }
+  }
+  console.error(`    ❌ verify[${index}]: could not confirm on-chain after ${retries+1} attempts`);
+  return false;
 }
 
+// After execute_whole_vault_transfer/burn: re-fetch vault token account balance
+// Returns true if balance is 0 (drained), false if still has tokens
+async function verifyVaultDrained(vaultAta, mintStr, retries = VERIFY_RETRIES) {
+  await sleep(VERIFY_DELAY_MS);
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const info = await connection.getTokenAccountBalance(vaultAta);
+      const bal  = Number(info.value.amount);
+      if (bal === 0) {
+        console.log(`    ✔  verify vault[${mintStr.slice(0,8)}...]: confirmed drained (balance=0)`);
+        return true;
+      }
+      if (attempt < retries) {
+        console.warn(`    ⚠️  verify vault[${mintStr.slice(0,8)}...]: balance still ${bal} (attempt ${attempt+1}/${retries+1}) — retrying`);
+        await sleep(VERIFY_RETRY_MS);
+      }
+    } catch (_) {
+      // Account closed/gone after burn — that's success
+      console.log(`    ✔  verify vault[${mintStr.slice(0,8)}...]: token account gone (burned/closed)`);
+      return true;
+    }
+  }
+  console.error(`    ❌ verify vault[${mintStr.slice(0,8)}...]: still has balance after ${retries+1} attempts`);
+  return false;
+}
+
+// ─── Instruction builders ─────────────────────────────────────────────────────
+
 async function buildCheckSilence(ghost) {
-  // CheckSilence accounts: ghost(mut), caller(mut,signer), ghost_mint,
-  //   ghost_stake_vault(mut), caller_token_account(mut), token_program
   const ownerPk      = new PublicKey(ghost.owner);
   const ghostPdaPk   = new PublicKey(ghost.pubkey);
   const [stakeVault] = deriveStakeVault(ownerPk);
-
-  // Dynamically resolve token program from mint owner — same as frontend
   const ghostTokenProg = await resolveTokenProgram(ghostMintPk);
-  // Use BOT_GHOST_ATA env var if set (avoids derivation issues with Token-2022)
   const botAta = process.env.BOT_GHOST_ATA
     ? new PublicKey(process.env.BOT_GHOST_ATA)
     : deriveATA(botKp.publicKey, ghostMintPk, ghostTokenProg);
 
-  console.log(`    [check_silence] ghost_mint token program: ${ghostTokenProg.toBase58().slice(0,8)}... botAta: ${botAta.toBase58().slice(0,8)}...`);
+  console.log(`    [check_silence] token_prog: ${ghostTokenProg.toBase58().slice(0,8)}... botAta: ${botAta.toBase58().slice(0,8)}...`);
 
   return new TransactionInstruction({
     programId: programIdPk,
     keys: [
-      { pubkey: ghostPdaPk,       isSigner: false, isWritable: true  }, // ghost
-      { pubkey: botKp.publicKey,  isSigner: true,  isWritable: true  }, // caller
-      { pubkey: ghostMintPk,      isSigner: false, isWritable: false }, // ghost_mint
-      { pubkey: stakeVault,       isSigner: false, isWritable: true  }, // ghost_stake_vault
-      { pubkey: botAta,           isSigner: false, isWritable: true  }, // caller_token_account
-      { pubkey: ghostTokenProg,   isSigner: false, isWritable: false }, // token_program (resolved)
+      { pubkey: ghostPdaPk,       isSigner: false, isWritable: true  },
+      { pubkey: botKp.publicKey,  isSigner: true,  isWritable: true  },
+      { pubkey: ghostMintPk,      isSigner: false, isWritable: false },
+      { pubkey: stakeVault,       isSigner: false, isWritable: true  },
+      { pubkey: botAta,           isSigner: false, isWritable: true  },
+      { pubkey: ghostTokenProg,   isSigner: false, isWritable: false },
     ],
     data: DISC.check_silence,
   });
 }
 
 function buildExecuteLegacy(ghost) {
-  // ExecuteLegacy accounts: ghost(mut), caller(signer)
   return new TransactionInstruction({
     programId: programIdPk,
     keys: [
-      { pubkey: new PublicKey(ghost.pubkey), isSigner: false, isWritable: true  }, // ghost
-      { pubkey: botKp.publicKey,             isSigner: true,  isWritable: false }, // caller
+      { pubkey: new PublicKey(ghost.pubkey), isSigner: false, isWritable: true  },
+      { pubkey: botKp.publicKey,             isSigner: true,  isWritable: false },
     ],
     data: DISC.execute_legacy,
   });
 }
 
-function buildExecuteTransfer(ghost, bIndex, bene) {
-  // ExecuteTransfer accounts: ghost(mut), vault, token_mint(mut), vault_token_account(mut),
-  //   recipient, recipient_token_account(mut), token_program, caller(signer)
-  // + arg: beneficiary_index (u8)
+async function buildExecuteTransfer(ghost, bIndex, bene) {
   const ownerPk      = new PublicKey(ghost.owner);
   const [vaultPk]    = deriveVaultPda(ownerPk);
   const mintPk       = new PublicKey(bene.tokenMint);
   const recipientPk  = new PublicKey(bene.recipient);
-  const vaultAta     = deriveATA(vaultPk, mintPk);
-  const recipientAta = deriveATA(recipientPk, mintPk);
+  const tokenProg    = await resolveTokenProgram(mintPk);
+  const vaultAta     = deriveATA(vaultPk, mintPk, tokenProg);
+  const recipientAta = deriveATA(recipientPk, mintPk, tokenProg);
 
   const data = Buffer.alloc(9);
   DISC.execute_transfer.copy(data, 0);
   data.writeUInt8(bIndex, 8);
-
-  return new TransactionInstruction({
-    programId: programIdPk,
-    keys: [
-      { pubkey: new PublicKey(ghost.pubkey), isSigner: false, isWritable: true  }, // ghost
-      { pubkey: vaultPk,                     isSigner: false, isWritable: false }, // vault
-      { pubkey: mintPk,                      isSigner: false, isWritable: true  }, // token_mint
-      { pubkey: vaultAta,                    isSigner: false, isWritable: true  }, // vault_token_account
-      { pubkey: recipientPk,                 isSigner: false, isWritable: false }, // recipient
-      { pubkey: recipientAta,                isSigner: false, isWritable: true  }, // recipient_token_account
-      { pubkey: tokenProgPk,                 isSigner: false, isWritable: false }, // token_program
-      { pubkey: botKp.publicKey,             isSigner: true,  isWritable: false }, // caller
-    ],
-    data,
-  });
-}
-
-function buildExecuteBurn(ghost, bIndex, bene) {
-  // ExecuteBurn accounts: ghost(mut), vault, mint(mut), vault_token_account(mut),
-  //   token_program, caller(signer)
-  // + arg: beneficiary_index (u8)
-  const ownerPk   = new PublicKey(ghost.owner);
-  const [vaultPk] = deriveVaultPda(ownerPk);
-  const mintPk    = new PublicKey(bene.tokenMint);
-  const vaultAta  = deriveATA(vaultPk, mintPk);
-
-  const data = Buffer.alloc(9);
-  DISC.execute_burn.copy(data, 0);
-  data.writeUInt8(bIndex, 8);
-
-  return new TransactionInstruction({
-    programId: programIdPk,
-    keys: [
-      { pubkey: new PublicKey(ghost.pubkey), isSigner: false, isWritable: true  }, // ghost
-      { pubkey: vaultPk,                     isSigner: false, isWritable: false }, // vault
-      { pubkey: mintPk,                      isSigner: false, isWritable: true  }, // mint
-      { pubkey: vaultAta,                    isSigner: false, isWritable: true  }, // vault_token_account
-      { pubkey: tokenProgPk,                 isSigner: false, isWritable: false }, // token_program
-      { pubkey: botKp.publicKey,             isSigner: true,  isWritable: false }, // caller
-    ],
-    data,
-  });
-}
-
-function buildExecuteWholeVaultTransfer(ghost, mintPkStr) {
-  // ExecuteWholeVaultTransfer: ghost(mut), vault, token_mint(mut), vault_token_account(mut),
-  //   recipient, recipient_token_account(mut), token_program, caller(signer)
-  const ownerPk      = new PublicKey(ghost.owner);
-  const [vaultPk]    = deriveVaultPda(ownerPk);
-  const mintPk       = new PublicKey(mintPkStr);
-  const recipientPk  = new PublicKey(ghost.wholeVaultRecipient);
-  const vaultAta     = deriveATA(vaultPk, mintPk);
-  const recipientAta = deriveATA(recipientPk, mintPk);
 
   return new TransactionInstruction({
     programId: programIdPk,
@@ -315,20 +316,23 @@ function buildExecuteWholeVaultTransfer(ghost, mintPkStr) {
       { pubkey: vaultAta,                    isSigner: false, isWritable: true  },
       { pubkey: recipientPk,                 isSigner: false, isWritable: false },
       { pubkey: recipientAta,                isSigner: false, isWritable: true  },
-      { pubkey: tokenProgPk,                 isSigner: false, isWritable: false },
+      { pubkey: tokenProg,                   isSigner: false, isWritable: false },
       { pubkey: botKp.publicKey,             isSigner: true,  isWritable: false },
     ],
-    data: DISC.execute_whole_vault_transfer,
+    data,
   });
 }
 
-function buildExecuteWholeVaultBurn(ghost, mintPkStr) {
-  // ExecuteWholeVaultBurn: ghost(mut), vault, token_mint(mut), vault_token_account(mut),
-  //   token_program, caller(signer)
+async function buildExecuteBurn(ghost, bIndex, bene) {
   const ownerPk   = new PublicKey(ghost.owner);
   const [vaultPk] = deriveVaultPda(ownerPk);
-  const mintPk    = new PublicKey(mintPkStr);
-  const vaultAta  = deriveATA(vaultPk, mintPk);
+  const mintPk    = new PublicKey(bene.tokenMint);
+  const tokenProg = await resolveTokenProgram(mintPk);
+  const vaultAta  = deriveATA(vaultPk, mintPk, tokenProg);
+
+  const data = Buffer.alloc(9);
+  DISC.execute_burn.copy(data, 0);
+  data.writeUInt8(bIndex, 8);
 
   return new TransactionInstruction({
     programId: programIdPk,
@@ -337,7 +341,49 @@ function buildExecuteWholeVaultBurn(ghost, mintPkStr) {
       { pubkey: vaultPk,                     isSigner: false, isWritable: false },
       { pubkey: mintPk,                      isSigner: false, isWritable: true  },
       { pubkey: vaultAta,                    isSigner: false, isWritable: true  },
-      { pubkey: tokenProgPk,                 isSigner: false, isWritable: false },
+      { pubkey: tokenProg,                   isSigner: false, isWritable: false },
+      { pubkey: botKp.publicKey,             isSigner: true,  isWritable: false },
+    ],
+    data,
+  });
+}
+
+async function buildExecuteWholeVaultTransfer(ghost, mintPk, tokenProg) {
+  const ownerPk      = new PublicKey(ghost.owner);
+  const [vaultPk]    = deriveVaultPda(ownerPk);
+  const recipientPk  = new PublicKey(ghost.wholeVaultRecipient);
+  const vaultAta     = deriveATA(vaultPk, mintPk, tokenProg);
+  const recipientAta = deriveATA(recipientPk, mintPk, tokenProg);
+
+  return new TransactionInstruction({
+    programId: programIdPk,
+    keys: [
+      { pubkey: new PublicKey(ghost.pubkey), isSigner: false, isWritable: true  },
+      { pubkey: vaultPk,                     isSigner: false, isWritable: false },
+      { pubkey: mintPk,                      isSigner: false, isWritable: true  },
+      { pubkey: vaultAta,                    isSigner: false, isWritable: true  },
+      { pubkey: recipientPk,                 isSigner: false, isWritable: false },
+      { pubkey: recipientAta,                isSigner: false, isWritable: true  },
+      { pubkey: tokenProg,                   isSigner: false, isWritable: false },
+      { pubkey: botKp.publicKey,             isSigner: true,  isWritable: false },
+    ],
+    data: DISC.execute_whole_vault_transfer,
+  });
+}
+
+async function buildExecuteWholeVaultBurn(ghost, mintPk, tokenProg) {
+  const ownerPk   = new PublicKey(ghost.owner);
+  const [vaultPk] = deriveVaultPda(ownerPk);
+  const vaultAta  = deriveATA(vaultPk, mintPk, tokenProg);
+
+  return new TransactionInstruction({
+    programId: programIdPk,
+    keys: [
+      { pubkey: new PublicKey(ghost.pubkey), isSigner: false, isWritable: true  },
+      { pubkey: vaultPk,                     isSigner: false, isWritable: false },
+      { pubkey: mintPk,                      isSigner: false, isWritable: true  },
+      { pubkey: vaultAta,                    isSigner: false, isWritable: true  },
+      { pubkey: tokenProg,                   isSigner: false, isWritable: false },
       { pubkey: botKp.publicKey,             isSigner: true,  isWritable: false },
     ],
     data: DISC.execute_whole_vault_burn,
@@ -350,10 +396,20 @@ async function processGhost(ghost) {
   const now   = Math.floor(Date.now() / 1000);
   const label = ghost.owner.slice(0, 8) + '...';
 
-  // Fully done — nothing to do
-  if (ghost.executed && ghost.beneficiaries.every(b => b.executed) && !ghost.wholeVaultRecipient) return;
+  // Log stake status for awareness (bot cannot touch it — owner must call abandon_ghost)
+  if (ghost.stakedGhost > 0) {
+    const stakeFormatted = (ghost.stakedGhost / 1_000_000).toLocaleString();
+    console.log(`  💎 ${label} staked: ${stakeFormatted} $GHOST (locked in stake_vault — owner must call abandon_ghost to reclaim)`);
+  }
 
-  // Already executed (execute_legacy done) but some beneficiaries pending
+  // Already fully executed and all beneficiaries paid
+  const allBenePaid = ghost.beneficiaries.every(b => b.executed);
+  if (ghost.executed && allBenePaid && !ghost.wholeVaultRecipient) {
+    console.log(`  ✅ ${label} fully executed — nothing to do`);
+    return;
+  }
+
+  // Already executed — just run remaining beneficiaries/vault
   if (ghost.executed) {
     await runBeneficiaries(ghost, label, now);
     return;
@@ -370,19 +426,17 @@ async function processGhost(ghost) {
       return;
     }
 
-    // Overdue — call check_silence to awaken
     const overdueH = Math.floor((silence - ghost.intervalSeconds) / 3600);
     console.log(`  🔔 ${label} overdue by ${overdueH}h — calling check_silence`);
-    const checkSilenceIx = await buildCheckSilence(ghost);
-    await sendTx([checkSilenceIx], `check_silence(${label})`);
-    // Grace period starts now — do NOT execute yet, wait for next poll
-    console.log(`  ⏳ ${label} awakened. Grace: ${ghost.gracePeriodSeconds}s — checking again next poll`);
+    const ix = await buildCheckSilence(ghost);
+    await sendTx([ix], `check_silence(${label})`);
+    console.log(`  ⏳ ${label} awakened. Grace: ${ghost.gracePeriodSeconds}s — waiting for next poll`);
     return;
   }
 
   // Awakened — check grace period
   if (ghost.awakenedAt === null) {
-    console.warn(`  ⚠️  ${label} awakened=true but awakenedAt=null — parse error, skipping`);
+    console.warn(`  ⚠️  ${label} awakened=true but awakenedAt=null — skipping`);
     return;
   }
 
@@ -390,70 +444,122 @@ async function processGhost(ghost) {
   const secsUntilExpiry = graceEnd - now;
 
   if (secsUntilExpiry > 0) {
-    // Grace period still active — owner can still cancel. Do nothing.
     console.log(`  ⏳ ${label} in grace period — ${Math.floor(secsUntilExpiry/60)}m ${secsUntilExpiry%60}s left`);
     return;
   }
 
-  // Grace expired — call execute_legacy then run beneficiaries
+  // Grace expired — execute
   console.log(`  💀 ${label} grace expired — calling execute_legacy`);
   const ok = await sendTx([buildExecuteLegacy(ghost)], `execute_legacy(${label})`);
   if (!ok) return;
 
-  // Re-fetch fresh state so beneficiary.executed flags are accurate
+  // Re-fetch fresh on-chain state before running beneficiaries
   const info = await connection.getAccountInfo(new PublicKey(ghost.pubkey));
-  if (!info) return;
+  if (!info) { console.error(`    ❌ Could not re-fetch ghost after execute_legacy`); return; }
   const fresh = parseGhost(ghost.pubkey, new Uint8Array(info.data));
   if (fresh) await runBeneficiaries(fresh, label, now);
 }
+
+// ─── Enumerate vault token accounts ──────────────────────────────────────────
+
+async function getVaultTokenAccounts(vaultPk) {
+  // Fetch all token accounts owned by the vault PDA across both token programs
+  const results = [];
+  for (const progAddr of [TOKEN_PROG_ADDR, TOKEN22_PROG_ADDR]) {
+    try {
+      const progPk = new PublicKey(progAddr);
+      const accts  = await connection.getTokenAccountsByOwner(vaultPk, { programId: progPk });
+      for (const { pubkey, account } of accts.value) {
+        try {
+          // Minimal parse: amount is at offset 64 (u64, 8 bytes) in token account layout
+          const data   = account.data;
+          const mintPk = new PublicKey(data.slice(0, 32));
+          const view   = new DataView(data.buffer, data.byteOffset, data.byteLength);
+          const amount = Number(view.getBigUint64(64, true));
+          if (amount > 0) {
+            results.push({ pubkey, mint: mintPk, amount, tokenProg: progPk });
+          }
+        } catch (_) {}
+      }
+    } catch (err) {
+      console.warn(`    ⚠️  getTokenAccountsByOwner (${progAddr.slice(0,8)}...) failed: ${err.message}`);
+    }
+  }
+  return results;
+}
+
+// ─── Run beneficiaries + whole vault ─────────────────────────────────────────
 
 async function runBeneficiaries(ghost, label, now) {
   // Hard guard — never run if grace period still active
   if (ghost.awakenedAt !== null) {
     const graceEnd = ghost.awakenedAt + ghost.gracePeriodSeconds;
     if (now <= graceEnd) {
-      console.log(`  ⏳ ${label} grace period still active — not running beneficiaries`);
+      console.log(`  ⏳ ${label} grace still active — not running beneficiaries`);
       return;
     }
   }
 
+  // ── Individual beneficiaries (fixed token/amount per slot) ───────────────
   for (let i = 0; i < ghost.beneficiaryCount; i++) {
     const b = ghost.beneficiaries[i];
     if (b.executed) { console.log(`    [${i}] already paid — skip`); continue; }
     if (!b.tokenMint) { console.log(`    [${i}] no token_mint — skip`); continue; }
 
+    const mintPk    = new PublicKey(b.tokenMint);
+    const tokenProg = await resolveTokenProgram(mintPk).catch(() => null);
+    if (!tokenProg) { console.warn(`    [${i}] could not resolve token program for mint ${b.tokenMint.slice(0,8)}...`); continue; }
+
     if (b.action === 0) {
-      await sendTx([buildExecuteTransfer(ghost, i, b)], `execute_transfer[${i}](${label})`);
+      const ix = await buildExecuteTransfer(ghost, i, b);
+      const sig = await sendTx([ix], `execute_transfer[${i}](${label})`);
+      if (sig) await verifyBeneficiaryPaid(ghost.pubkey, i);
     } else if (b.action === 1) {
-      await sendTx([buildExecuteBurn(ghost, i, b)], `execute_burn[${i}](${label})`);
+      const ix = await buildExecuteBurn(ghost, i, b);
+      const sig = await sendTx([ix], `execute_burn[${i}](${label})`);
+      if (sig) await verifyBeneficiaryPaid(ghost.pubkey, i);
     } else {
       console.log(`    [${i}] unknown action ${b.action} — skip`);
     }
   }
 
-  // Whole vault
+  // ── Whole vault: enumerate ALL vault token accounts ───────────────────────
   if (ghost.wholeVaultRecipient) {
-    const wvMint   = process.env.WHOLE_VAULT_MINT || GHOST_MINT_ADDR;
-    const ownerPk  = new PublicKey(ghost.owner);
+    const ownerPk   = new PublicKey(ghost.owner);
     const [vaultPk] = deriveVaultPda(ownerPk);
-    const ghostTokenProg = await resolveTokenProgram(ghostMintPk);
-    const vaultAta = deriveATA(vaultPk, new PublicKey(wvMint), ghostTokenProg);
 
-    // Check vault token account balance before attempting — skip if empty or missing
-    let vaultBalance = 0;
-    try {
-      const vaultInfo = await connection.getTokenAccountBalance(vaultAta);
-      vaultBalance = Number(vaultInfo.value.amount);
-    } catch (_) {
-      // Account doesn't exist — vault is empty
+    console.log(`    [whole_vault] enumerating vault token accounts for ${vaultPk.toBase58().slice(0,8)}...`);
+    const vaultAccounts = await getVaultTokenAccounts(vaultPk);
+
+    if (vaultAccounts.length === 0) {
+      console.log(`    [whole_vault] vault has no token accounts with balance — nothing to do`);
+    } else {
+      console.log(`    [whole_vault] found ${vaultAccounts.length} token account(s) with balance`);
+
+      for (const { pubkey: vaultAta, mint: mintPk, amount, tokenProg } of vaultAccounts) {
+        const mintStr = mintPk.toBase58();
+        console.log(`    [whole_vault] mint: ${mintStr.slice(0,8)}... amount: ${amount}`);
+
+        if (ghost.wholeVaultAction === 0) {
+          // Transfer to recipient
+          const ix  = await buildExecuteWholeVaultTransfer(ghost, mintPk, tokenProg);
+          const sig = await sendTx([ix], `execute_whole_vault_transfer[${mintStr.slice(0,8)}...](${label})`);
+          if (sig) await verifyVaultDrained(vaultAta, mintStr);
+        } else if (ghost.wholeVaultAction === 1) {
+          // Burn
+          const ix  = await buildExecuteWholeVaultBurn(ghost, mintPk, tokenProg);
+          const sig = await sendTx([ix], `execute_whole_vault_burn[${mintStr.slice(0,8)}...](${label})`);
+          if (sig) await verifyVaultDrained(vaultAta, mintStr);
+        } else {
+          console.warn(`    [whole_vault] unknown action ${ghost.wholeVaultAction} for mint ${mintStr.slice(0,8)}...`);
+        }
+      }
     }
 
-    if (vaultBalance === 0) {
-      console.log(`    [whole_vault] vault empty or no token account — skipping`);
-    } else if (ghost.wholeVaultAction === 0) {
-      await sendTx([buildExecuteWholeVaultTransfer(ghost, wvMint)], `execute_whole_vault_transfer(${label})`);
-    } else if (ghost.wholeVaultAction === 1) {
-      await sendTx([buildExecuteWholeVaultBurn(ghost, wvMint)], `execute_whole_vault_burn(${label})`);
+    // Log staked ghost reminder — owner must call abandon_ghost to reclaim
+    if (ghost.stakedGhost > 0) {
+      const stakeFormatted = (ghost.stakedGhost / 1_000_000).toLocaleString();
+      console.log(`    [stake] ${stakeFormatted} $GHOST remains in stake_vault — owner must call abandon_ghost to reclaim (50% burn penalty applies)`);
     }
   }
 }
@@ -473,8 +579,8 @@ async function scan() {
       filters: [{ memcmp: { offset: 0, bytes: bs58.encode(GHOST_ACCOUNT_DISC) } }],
     });
 
-    const v17 = accounts.filter(a => a.account.data.length === 1228); // 1220 + 8
-    const v18 = accounts.filter(a => a.account.data.length === 1229); // 1221 + 8
+    const v17 = accounts.filter(a => a.account.data.length === 1228);
+    const v18 = accounts.filter(a => a.account.data.length === 1229);
     console.log(`  Found ${v17.length} v1.7 + ${v18.length} v1.8 = ${accounts.length} account(s)`);
 
     for (const { pubkey, account } of accounts) {
