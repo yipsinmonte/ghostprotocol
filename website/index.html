@@ -837,27 +837,41 @@
           </div>
         </div>
 
-        <div class="db-alert" id="dbExecutedAlert" style="display:none;border-color:rgba(255,51,102,0.4);background:rgba(255,51,102,0.08)">
-          <div style="color:#ff3366;font-weight:700;letter-spacing:0.08em;margin-bottom:6px">💀 GHOST EXECUTED — Protocol has run</div>
-          <div style="font-size:12px;color:rgba(255,180,180,0.8);line-height:1.6;margin-bottom:10px">
-            Your ghost has been executed by the protocol bot. All vault assets have been distributed to your designated beneficiaries or whole-vault recipient.<br>
-            Your staked <strong id="dbExecutedStake">—</strong> $GHOST remains locked in the stake vault — only you can reclaim it via <em>Abandon Ghost</em> (50% burn applies).
+        <!-- Executed ghost: full-page takeover panel, hidden for non-executed ghosts -->
+        <div id="dbExecutedPanel" style="display:none;margin-bottom:24px">
+
+          <!-- Skull header — subdued, not red-blasted -->
+          <div style="text-align:center;padding:28px 20px 20px;position:relative">
+            <div style="font-size:52px;margin-bottom:10px;filter:grayscale(0.3) brightness(0.85)">💀</div>
+            <div style="font-family:'Syne',sans-serif;font-weight:900;font-size:18px;letter-spacing:0.12em;color:#d0d0e8">GHOST EXECUTED</div>
+            <div id="dbExecDetailTime" style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#5a5a7a;letter-spacing:0.15em;margin-top:4px;text-transform:uppercase"></div>
           </div>
-          <button class="db-btn" onclick="dbAbandonOnChain()" style="background:rgba(255,51,102,0.15);border:1px solid rgba(255,51,102,0.4);color:#ff3366;font-size:11px;padding:6px 16px;letter-spacing:0.08em">
-            👻 ABANDON GHOST &amp; RECLAIM STAKE
-          </button>
+
+          <!-- Distribution report card -->
+          <div style="border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);margin-bottom:2px;overflow:hidden">
+            <div style="padding:10px 18px;background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:space-between">
+              <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.18em;color:#7070a0">DISTRIBUTION REPORT</div>
+              <div id="dbExecTotalValue" style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#5a5a7a"></div>
+            </div>
+            <div id="dbExecDetailBody">
+              <div style="padding:20px 18px;font-family:'Share Tech Mono',monospace;font-size:12px;color:#4a4a6a">Loading...</div>
+            </div>
+          </div>
+
+          <!-- Stake locked row -->
+          <div id="dbExecStakeRow" style="display:none;border:1px solid rgba(102,51,255,0.12);background:rgba(102,51,255,0.04);padding:14px 18px;margin-bottom:2px;display:flex;align-items:center;gap:12px">
+            <div style="width:32px;height:32px;border-radius:50%;background:rgba(102,51,255,0.12);border:1px solid rgba(102,51,255,0.25);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px">💎</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#a080ff"><strong id="dbExecutedStake">—</strong> $GHOST</div>
+              <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#5a5a7a;margin-top:2px">Staked · locked in vault · reclaim via Abandon Ghost (50% burn)</div>
+            </div>
+            <button onclick="dbAbandonOnChain()" style="background:rgba(102,51,255,0.1);border:1px solid rgba(102,51,255,0.3);color:#a080ff;font-family:'Share Tech Mono',monospace;font-size:10px;padding:6px 12px;cursor:pointer;letter-spacing:0.08em;white-space:nowrap;flex-shrink:0">RECLAIM</button>
+          </div>
+
         </div>
 
-        <!-- Execution detail panel — shown only for executed ghosts, populated by renderExecutionDetail() -->
-        <div id="dbExecutionDetail" style="display:none;margin-bottom:20px;border:1px solid rgba(255,51,102,0.2);background:rgba(255,51,102,0.04);border-radius:4px;overflow:hidden">
-          <div style="padding:14px 18px;border-bottom:1px solid rgba(255,51,102,0.15);display:flex;align-items:center;justify-content:space-between">
-            <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:13px;color:#ff3366;letter-spacing:0.06em">💀 EXECUTION REPORT</div>
-            <div id="dbExecDetailTime" style="font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(255,100,130,0.6)"></div>
-          </div>
-          <div id="dbExecDetailBody" style="padding:0">
-            <div style="padding:16px 18px;font-family:'Share Tech Mono',monospace;font-size:12px;color:#c0bce0">Loading execution details...</div>
-          </div>
-        </div>
+        <!-- keep dbExecutedAlert id for JS compat but invisible — replaced by panel above -->
+        <div id="dbExecutedAlert" style="display:none"><strong id="dbExecutedStake_compat"></strong></div>
 
         <div class="status-hero">
           <div>
@@ -2968,16 +2982,35 @@ async function fetchOnChainHistory() {
         } catch(_) {}
         return '🔥 Token burn executed';
       }
-      // Whole vault transfer — show recipient from ghost state
-      if (matchHex === '345d3184612eda0d') {
+      // Whole vault transfer — extract token + amount from inner SPL transfer instructions
+      if (matchHex === '345d3184612eda0d' || matchHex === '59da97947864b51c') {
+        const isBurnWv = matchHex === '59da97947864b51c';
         const wvr = ghostState.ghost?.wholeVaultRecipient;
-        if (wvr) {
-          const shortWv = wvr.slice(0,4)+'...'+wvr.slice(-4);
-          return `📤 Whole vault transfer · → ${shortWv}`;
+        const shortWv = wvr ? wvr.slice(0,4)+'...'+wvr.slice(-4) : '';
+        // Pull token amounts from inner parsed transfer instructions
+        const _wsolMint = 'So11111111111111111111111111111111111111112';
+        const tokenParts = [];
+        for (const ix of inner) {
+          const p = ix.parsed;
+          if (p && (p.type === 'transfer' || p.type === 'transferChecked')) {
+            const info = p.info || {};
+            const amt = info.tokenAmount?.uiAmountString || info.amount;
+            const mint = info.mint || '';
+            const known = [...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(t=>t.mint===mint);
+            const sym = known?.symbol || (mint===_wsolMint ? 'wSOL' : mint ? mint.slice(0,6)+'…' : '');
+            if (amt && sym) {
+              const n = parseFloat(amt);
+              const fmt = n >= 1000 ? n.toLocaleString(undefined,{maximumFractionDigits:2}) : parseFloat(n.toPrecision(4)).toString();
+              tokenParts.push(`${fmt} ${sym}`);
+            }
+          }
         }
-        return '📤 Whole vault transfer executed';
+        if (isBurnWv) {
+          return tokenParts.length > 0 ? `🔥 Whole vault burned · ${tokenParts.join(' · ')}` : '🔥 Whole vault burn executed';
+        }
+        const dest = shortWv ? ` → ${shortWv}` : '';
+        return tokenParts.length > 0 ? `📤 Whole vault transfer${dest} · ${tokenParts.join(' · ')}` : `📤 Whole vault transfer${dest}`;
       }
-      if (matchHex === '59da97947864b51c') return '🔥 Whole vault burn executed';
       if (matchHex === '4740f97b68dcbc90') return '💀 Ghost executed by protocol';
       if (matchHex === 'ca3ef808ddc9e69e') return '⏰ Silence detected — Ghost awakened by bot';
       return baseLabel;
@@ -3494,8 +3527,11 @@ function updateDashboardUI() {
   if (execAlert) {
     execAlert.style.display = g.status === 'executed' ? 'block' : 'none';
     if (g.status === 'executed') {
+      // dbExecutedStake lives inside dbExecStakeRow in the new execution panel
       const stakeEl = document.getElementById('dbExecutedStake');
       if (stakeEl) stakeEl.textContent = (g.stakedGhost || 0).toLocaleString();
+      const stakeRowEl = document.getElementById('dbExecStakeRow');
+      if (stakeRowEl) stakeRowEl.style.display = (g.stakedGhost || 0) > 0 ? 'flex' : 'none';
     }
   }
 
@@ -3523,12 +3559,23 @@ function updateDashboardUI() {
     }
   });
 
-  // Show/hide execution detail panel
-  const execDetailEl = document.getElementById('dbExecutionDetail');
-  if (execDetailEl) {
-    execDetailEl.style.display = isExecuted ? 'block' : 'none';
+  // Show/hide executed panel (replaces old dbExecutedAlert + dbExecutionDetail)
+  const execPanelEl = document.getElementById('dbExecutedPanel');
+  if (execPanelEl) {
+    execPanelEl.style.display = isExecuted ? 'block' : 'none';
     if (isExecuted) renderExecutionDetail();
   }
+  // Hide normal overview sections when executed — status orb / vault / cards / progress clutter
+  const _execHideIds = ['dbAwakeningAlert','dbExecutedAlert'];
+  _execHideIds.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+  // Dim the status-hero + progress + vault overview when executed (still there but faded)
+  const _statusHero = document.querySelector('.status-hero');
+  const _progressEl = document.querySelector('.db-progress');
+  const _vaultHdr = document.querySelector('#db-page-overview .db-section-header');
+  if (_statusHero) _statusHero.style.opacity = isExecuted ? '0.3' : '';
+  if (_statusHero) _statusHero.style.pointerEvents = isExecuted ? 'none' : '';
+  if (_progressEl) _progressEl.style.opacity = isExecuted ? '0.3' : '';
+  if (_progressEl) _progressEl.style.pointerEvents = isExecuted ? 'none' : '';
 
   // Update grace period countdown
   const graceCountdownEl = document.getElementById('dbGraceCountdown');
@@ -4474,128 +4521,173 @@ function addActivityRow(msg, tx, icon) {
 function renderExecutionDetail() {
   const body = document.getElementById('dbExecDetailBody');
   const timeEl = document.getElementById('dbExecDetailTime');
+  const stakeRow = document.getElementById('dbExecStakeRow');
+  const stakeEl = document.getElementById('dbExecutedStake');
   if (!body) return;
 
   const g = ghostState.ghost;
   const log = ghostState.activityLog || [];
 
-  // Find execute-related transactions from activity log
-  const execDiscs = new Set([
-    '4740f97b68dcbc90', // execute_legacy
-    'e97ea0b8ebce1f77', // execute_transfer
-    'ea3081dc28de3a9f', // execute_burn
-    '345d3184612eda0d', // execute_whole_vault_transfer
-    '59da97947864b51c', // execute_whole_vault_burn
-    'ca3ef808ddc9e69e', // check_silence
-  ]);
+  // ── Timestamp from activity log ──
+  const execMsgs = ['executed', 'transfer executed', 'burn executed', 'Silence detected', 'Whole vault', 'Ghost executed'];
+  const execEvents = log.filter(e => e.msg && execMsgs.some(m => e.msg.includes(m)));
+  if (execEvents.length > 0 && timeEl) {
+    const latest = Math.max(...execEvents.map(e => e.ts || 0));
+    if (latest > 0) {
+      timeEl.textContent = 'Executed ' + new Date(latest).toLocaleDateString(undefined, {day:'numeric', month:'short', year:'numeric'});
+    }
+  }
 
-  const execEvents = log.filter(e =>
-    e.msg && (
-      e.msg.includes('executed') || e.msg.includes('transfer executed') ||
-      e.msg.includes('burn executed') || e.msg.includes('Silence detected') ||
-      e.msg.includes('Whole vault')
-    )
-  );
+  // ── Stake row ──
+  if (stakeRow && stakeEl) {
+    const stake = g.stakedGhost || 0;
+    if (stake > 0) {
+      stakeEl.textContent = stake.toLocaleString();
+      stakeRow.style.display = 'flex';
+    } else {
+      stakeRow.style.display = 'none';
+    }
+  }
 
-  // Build beneficiary summary from ghost state
+  // ── Collect all distribution lines ──
+  // We build a list of { icon, label, token, amount, recipient, status, txSig }
+  const lines = [];
+
   const benes = g.beneficiaries || [];
   const wholeRecipient = g.wholeVaultRecipient;
   const wholeAction = g.wholeVaultAction;
 
-  let html = '';
-
-  // Whole vault section
+  // Whole vault: pull per-token amounts from activity log tx data
+  // Each whole_vault tx in the log carries its label — we parse token+amount from it
   if (wholeRecipient) {
-    const actionLabel = wholeAction === 1 ? '🔥 Burned' : '📤 Transferred to';
-    const shortRecip = wholeRecipient.length > 8 ? wholeRecipient.slice(0,4)+'...'+wholeRecipient.slice(-4) : wholeRecipient;
-    html += `<div style="padding:14px 18px;border-bottom:1px solid rgba(255,51,102,0.08)">
-      <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.12em;color:rgba(255,100,130,0.5);margin-bottom:8px">WHOLE VAULT DISTRIBUTION</div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:18px">${wholeAction === 1 ? '🔥' : '📤'}</span>
-        <div>
-          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:13px;color:#f0f0f8">${actionLabel}</div>
-          <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#c0bce0;margin-top:2px">
-            <span title="${wholeRecipient}">${shortRecip}</span>
-          </div>
-        </div>
-        <div style="margin-left:auto">
-          <span style="font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.12em;padding:3px 8px;background:rgba(51,255,153,0.1);border:1px solid rgba(51,255,153,0.3);color:#33ff99">COMPLETE</span>
-        </div>
-      </div>
-    </div>`;
+    const shortR = wholeRecipient.slice(0,4)+'...'+wholeRecipient.slice(-4);
+    const wvLabel = wholeAction === 1 ? 'Whole vault burn' : 'Whole vault transfer';
+    // Find whole-vault tx entries in log that have token detail
+    const wvEntries = log.filter(e => e.msg && (e.msg.includes('Whole vault') || e.msg.includes('whole vault')));
+    // Also check if activityLog has per-token breakdown attached
+    const wvTxEntries = log.filter(e => e._wvTokens);
+
+    if (wvTxEntries.length > 0) {
+      // Detailed per-token breakdown available
+      for (const entry of wvTxEntries) {
+        for (const tk of entry._wvTokens) {
+          lines.push({
+            action: wholeAction === 1 ? 'burn' : 'transfer',
+            token: tk.symbol,
+            amount: tk.amount,
+            recipient: wholeAction === 1 ? null : shortR,
+            recipientFull: wholeRecipient,
+            status: 'complete',
+            tx: entry.tx,
+            source: 'whole_vault',
+          });
+        }
+      }
+    } else {
+      // Fallback: show vault tokens we know about (from vaultTokens before execution)
+      const vt = ghostState.vaultTokens || [];
+      if (vt.length > 0) {
+        for (const t of vt) {
+          lines.push({
+            action: wholeAction === 1 ? 'burn' : 'transfer',
+            token: t.symbol,
+            amount: t.balance,
+            recipient: wholeAction === 1 ? null : shortR,
+            recipientFull: wholeRecipient,
+            status: 'complete',
+            source: 'whole_vault',
+          });
+        }
+      } else {
+        // No token info — show generic whole vault entry
+        lines.push({
+          action: wholeAction === 1 ? 'burn' : 'transfer',
+          token: 'All tokens',
+          amount: null,
+          recipient: wholeAction === 1 ? null : shortR,
+          recipientFull: wholeRecipient,
+          status: 'complete',
+          source: 'whole_vault',
+        });
+      }
+    }
   }
 
   // Individual beneficiaries
-  const transfers = benes.filter(b => b.action !== 'whole-vault-share' && b.action !== 'burn');
-  const burns = benes.filter(b => b.action === 'burn');
-
-  if (transfers.length > 0) {
-    html += `<div style="padding:14px 18px 6px;border-bottom:1px solid rgba(255,51,102,0.08)">
-      <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.12em;color:rgba(255,100,130,0.5);margin-bottom:10px">BENEFICIARY TRANSFERS</div>`;
-    for (const b of transfers) {
-      const isPaid = b.executed || b._fromChain && b.executed;
-      const shortRecip = b.fullAddr ? (b.fullAddr.length > 8 ? b.fullAddr.slice(0,4)+'...'+b.fullAddr.slice(-4) : b.fullAddr) : (b.recipient || '—');
-      const amt = b.amount ? b.amount.toLocaleString(undefined,{maximumFractionDigits:6}) : '—';
-      html += `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.03)">
-        <span style="font-size:14px">📤</span>
-        <div style="flex:1;min-width:0">
-          <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#f0f0f8">${amt} <span style="color:#a080ff">${b.token || '?'}</span></div>
-          <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#6868a0;margin-top:1px" title="${b.fullAddr || ''}">${shortRecip}</div>
-        </div>
-        <span style="font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;padding:2px 7px;${isPaid
-          ? 'background:rgba(51,255,153,0.1);border:1px solid rgba(51,255,153,0.3);color:#33ff99'
-          : 'background:rgba(255,153,51,0.1);border:1px solid rgba(255,153,51,0.3);color:#ff9933'
-        }">${isPaid ? 'SENT' : 'PENDING'}</span>
-      </div>`;
-    }
-    html += `</div>`;
+  for (const b of benes.filter(b => b.action !== 'whole-vault-share')) {
+    const shortR = b.fullAddr ? b.fullAddr.slice(0,4)+'...'+b.fullAddr.slice(-4) : (b.recipient || '—');
+    lines.push({
+      action: b.action === 'burn' ? 'burn' : 'transfer',
+      token: b.token || '?',
+      amount: b.amount,
+      recipient: b.action === 'burn' ? null : shortR,
+      recipientFull: b.fullAddr || '',
+      status: b.executed ? 'complete' : 'pending',
+      source: 'bene',
+    });
   }
 
-  if (burns.length > 0) {
-    html += `<div style="padding:14px 18px 6px;border-bottom:1px solid rgba(255,51,102,0.08)">
-      <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.12em;color:rgba(255,100,130,0.5);margin-bottom:10px">BURNS</div>`;
-    for (const b of burns) {
-      const isPaid = b.executed;
-      const amt = b.amount ? b.amount.toLocaleString(undefined,{maximumFractionDigits:6}) : '—';
-      html += `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.03)">
-        <span style="font-size:14px">🔥</span>
-        <div style="flex:1">
-          <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#f0f0f8">${amt} <span style="color:#a080ff">${b.token || '?'}</span></div>
-          <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#6868a0;margin-top:1px">burned · sent to null address</div>
-        </div>
-        <span style="font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;padding:2px 7px;${isPaid
-          ? 'background:rgba(255,51,102,0.1);border:1px solid rgba(255,51,102,0.3);color:#ff3366'
-          : 'background:rgba(255,153,51,0.1);border:1px solid rgba(255,153,51,0.3);color:#ff9933'
-        }">${isPaid ? 'BURNED' : 'PENDING'}</span>
-      </div>`;
-    }
-    html += `</div>`;
-  }
-
-  // Stake reminder
-  if (g.stakedGhost > 0) {
-    html += `<div style="padding:12px 18px;display:flex;align-items:center;gap:10px;background:rgba(102,51,255,0.04)">
-      <span style="font-size:14px">💎</span>
-      <div style="flex:1">
-        <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#a080ff">${g.stakedGhost.toLocaleString()} $GHOST staked</div>
-        <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#6868a0;margin-top:1px">Locked in stake vault — reclaim via Abandon Ghost (50% burn)</div>
-      </div>
-      <span style="font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;padding:2px 7px;background:rgba(102,51,255,0.1);border:1px solid rgba(102,51,255,0.3);color:#a080ff">LOCKED</span>
+  if (lines.length === 0) {
+    body.innerHTML = `<div style="padding:24px 18px;font-family:'Share Tech Mono',monospace;font-size:12px;color:#4a4a6a;text-align:center">
+      No distribution data — refresh to load from chain.
     </div>`;
+    return;
   }
 
-  if (!html) {
-    html = `<div style="padding:16px 18px;font-family:'Share Tech Mono',monospace;font-size:12px;color:#6868a0">No execution details available — refresh to load from chain.</div>`;
+  // Group by recipient for cleaner display
+  const byRecipient = {};
+  for (const l of lines) {
+    const key = l.recipientFull || '__burn__';
+    if (!byRecipient[key]) byRecipient[key] = { action: l.action, recipient: l.recipient, recipientFull: l.recipientFull, tokens: [], allComplete: true };
+    byRecipient[key].tokens.push({ token: l.token, amount: l.amount, status: l.status });
+    if (l.status !== 'complete') byRecipient[key].allComplete = false;
+  }
+
+  let html = '';
+  const groups = Object.entries(byRecipient);
+
+  for (let gi = 0; gi < groups.length; gi++) {
+    const [key, grp] = groups[gi];
+    const isBurn = key === '__burn__' || grp.action === 'burn';
+    const isLast = gi === groups.length - 1;
+
+    const recipientLabel = isBurn
+      ? '<span style="color:#ff6644">🔥 Burned</span>'
+      : `<span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#9090c0" title="${grp.recipientFull}">→ ${grp.recipient}</span>`;
+
+    const statusChip = grp.allComplete
+      ? `<span style="font-family:'Share Tech Mono',monospace;font-size:9px;padding:2px 8px;letter-spacing:0.12em;background:rgba(51,255,153,0.07);border:1px solid rgba(51,255,153,0.2);color:#33ff99">${isBurn ? 'BURNED' : 'SENT'}</span>`
+      : `<span style="font-family:'Share Tech Mono',monospace;font-size:9px;padding:2px 8px;letter-spacing:0.12em;background:rgba(255,153,51,0.07);border:1px solid rgba(255,153,51,0.2);color:#ff9933">PENDING</span>`;
+
+    html += `<div style="padding:14px 18px;${isLast ? '' : 'border-bottom:1px solid rgba(255,255,255,0.04)'}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:8px">${recipientLabel}</div>
+        ${statusChip}
+      </div>`;
+
+    // Token rows
+    for (const tk of grp.tokens) {
+      const amtStr = tk.amount != null
+        ? typeof tk.amount === 'number'
+          ? tk.amount >= 1000 ? tk.amount.toLocaleString(undefined,{maximumFractionDigits:2}) : tk.amount.toPrecision(4).replace(/\.?0+$/, '')
+          : String(tk.amount)
+        : '';
+      const tokenColor = isBurn ? '#ff8866' : '#c0b8f8';
+      html += `<div style="display:flex;align-items:center;gap:10px;padding:5px 0">
+        <div style="width:4px;height:4px;border-radius:50%;background:${isBurn ? 'rgba(255,100,50,0.5)' : 'rgba(160,128,255,0.4)'};flex-shrink:0"></div>
+        <div style="flex:1;font-family:'Share Tech Mono',monospace;font-size:12px;color:#d0cce8">
+          ${amtStr ? `<span style="color:#f0f0f8;font-weight:600">${amtStr}</span> ` : ''}<span style="color:${tokenColor}">${tk.token}</span>
+        </div>
+        ${tk.status === 'pending' ? `<span style="font-family:'Share Tech Mono',monospace;font-size:9px;color:#6a6a8a">PENDING</span>` : ''}
+      </div>`;
+    }
+
+    html += `</div>`;
   }
 
   body.innerHTML = html;
-
-  // Set timestamp from most recent exec event
-  if (execEvents.length > 0 && timeEl) {
-    const latest = Math.max(...execEvents.map(e => e.ts || 0));
-    if (latest > 0) timeEl.textContent = new Date(latest).toLocaleDateString(undefined, {month:'short',day:'numeric',year:'numeric'});
-  }
 }
+
 
 function renderActivityLog() {
   const log = document.getElementById('dbActivityLog');
