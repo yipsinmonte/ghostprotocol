@@ -6209,6 +6209,9 @@ async function loadWalletTokens() {
       if (!info) continue;
       const balance = parseFloat(info.tokenAmount.uiAmountString || 0);
       if (balance <= 0) continue;
+      // Filter out NFTs — frozen token accounts with supply=1, decimals=0
+      // These use Metaplex freeze authority and can't be transferred via standard SPL
+      if (info.tokenAmount.decimals === 0 && balance === 1) continue;
       const mint = info.mint;
       const symbol = knownSymbols[mint] || null;
       if (!symbol) unknownMints.push(mint);
