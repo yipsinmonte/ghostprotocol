@@ -376,14 +376,13 @@ async function buildExecuteBurn(ghost, bIndex, bene) {
   });
 }
 
-async function buildExecuteWholeVaultTransfer(ghost, mintPk, tokenProg, vaultAtaPk) {
+async function buildExecuteWholeVaultTransfer(ghost, mintPk, tokenProg, vaultAtaPk, recipientTokenAcct) {
   const ownerPk      = new PublicKey(ghost.owner);
   const [vaultPk]    = deriveVaultPda(ownerPk);
   const recipientPk  = new PublicKey(ghost.wholeVaultRecipient);
-  // Use the actual token account pubkey from getTokenAccountsByOwner (not re-derived ATA)
-  // — vault tokens may have been deposited to non-ATA accounts
   const vaultAtaKey  = vaultAtaPk || deriveATA(vaultPk, mintPk, tokenProg);
-  const recipientAta = deriveATA(recipientPk, mintPk, tokenProg);
+  // Use provided recipient token account (may be manual keypair, not ATA)
+  const recipientAcctKey = recipientTokenAcct || deriveATA(recipientPk, mintPk, tokenProg);
 
   return new TransactionInstruction({
     programId: programIdPk,
@@ -393,7 +392,7 @@ async function buildExecuteWholeVaultTransfer(ghost, mintPk, tokenProg, vaultAta
       { pubkey: mintPk,                      isSigner: false, isWritable: true  },
       { pubkey: vaultAtaKey,                 isSigner: false, isWritable: true  },
       { pubkey: recipientPk,                 isSigner: false, isWritable: false },
-      { pubkey: recipientAta,                isSigner: false, isWritable: true  },
+      { pubkey: recipientAcctKey,                isSigner: false, isWritable: true  },
       { pubkey: tokenProg,                   isSigner: false, isWritable: false },
       { pubkey: botKp.publicKey,             isSigner: true,  isWritable: false },
     ],
@@ -420,53 +419,84 @@ async function buildExecuteWholeVaultBurn(ghost, mintPk, tokenProg, vaultAtaPk) 
   });
 }
 
-// ─── Create ATA if missing ───────────────────────────────────────────────────
-
-// Ensures recipient has a token account for mintPk.
-// Tries ATA program with [1] (idempotent) first, then empty data.
-// Always checks if account exists after any failure — confirm errors can be false negatives.
-async function ensureRecipientAta(ownerPk, mintPk, tokenProg) {
+// ─── Create recipient token account if missing ──────────────────────────────
+//
+// Bypasses ATA program (fails on Helius with ProgramAccountNotFound).
+// Uses SystemProgram.createAccount + InitializeAccount3 with a fresh keypair,
+// same approach as the working frontend (buildManualTokenAccountIxs).
+// Returns: { pubkey } of the token account, or null on failure.
+// If ATA already exists, returns { pubkey: ata }.
+// If keypair account is created, returns { pubkey: kp.publicKey, kp } (kp must sign tx).
+async function ensureRecipientTokenAccount(ownerPk, mintPk, tokenProg) {
   const ata = deriveATA(ownerPk, mintPk, tokenProg);
   console.log(`    [ata] checking ${ata.toBase58().slice(0,8)}... owner=${ownerPk.toBase58().slice(0,8)}... mint=${mintPk.toBase58().slice(0,8)}...`);
   try {
     const info = await connection.getAccountInfo(ata);
-    if (info) { console.log(`    [ata] already exists`); return true; }
+    if (info) { console.log(`    [ata] ATA exists`); return { pubkey: ata }; }
   } catch (_) {}
 
-  const SYSTEM_PROG = new PublicKey('11111111111111111111111111111111');
+  // ATA doesn't exist — create a manual token account via keypair
+  // (ATA program consistently fails on Helius with ProgramAccountNotFound)
+  console.log(`    [ata] creating manual token account (bypass ATA program)`);
+  const { Keypair } = require('@solana/web3.js');
+  const kp = Keypair.generate();
+  const space = 165;
+  const lamports = await connection.getMinimumBalanceForRentExemption(space);
 
-  for (const [variant, data] of [['idempotent [1]', Buffer.from([1])], ['standard []', Buffer.alloc(0)]]) {
-    console.log(`    [ata] trying ${variant} — ATA=${ata.toBase58().slice(0,8)}... mint=${mintPk.toBase58().slice(0,8)}... prog=${tokenProg.toBase58().slice(0,8)}...`);
-    const ix = new TransactionInstruction({
-      programId: assocTokenPk,
-      keys: [
-        { pubkey: botKp.publicKey, isSigner: true,  isWritable: true  },
-        { pubkey: ata,             isSigner: false, isWritable: true  },
-        { pubkey: ownerPk,         isSigner: false, isWritable: false },
-        { pubkey: mintPk,          isSigner: false, isWritable: false },
-        { pubkey: SYSTEM_PROG,     isSigner: false, isWritable: false },
-        { pubkey: tokenProg,       isSigner: false, isWritable: false },
-      ],
-      data,
-    });
+  const createIx = {
+    programId: new PublicKey('11111111111111111111111111111111'),
+    keys: [
+      { pubkey: botKp.publicKey, isSigner: true, isWritable: true },
+      { pubkey: kp.publicKey,    isSigner: true, isWritable: true },
+    ],
+    data: (() => {
+      // SystemProgram.createAccount serialization:
+      // [0..4] = instruction index (3 = CreateAccount, little-endian u32)
+      // [4..12] = lamports (u64 LE)
+      // [12..20] = space (u64 LE)
+      // [20..52] = programId (32 bytes)
+      const buf = Buffer.alloc(52);
+      buf.writeUInt32LE(0, 0); // CreateAccount = 0
+      buf.writeBigUInt64LE(BigInt(lamports), 4);
+      buf.writeBigUInt64LE(BigInt(space), 12);
+      tokenProg.toBytes().copy(buf, 20);
+      return buf;
+    })(),
+  };
 
-    const sig = await sendTxSkipPreflight([ix], `createATA-${variant}(${mintPk.toBase58().slice(0,8)}...)`);
+  // InitializeAccount3: opcode 18, then owner pubkey (32 bytes)
+  const initData = Buffer.alloc(33);
+  initData[0] = 18;
+  ownerPk.toBytes().copy(initData, 1);
+  const initIx = new TransactionInstruction({
+    programId: tokenProg,
+    keys: [
+      { pubkey: kp.publicKey, isSigner: false, isWritable: true },
+      { pubkey: mintPk,       isSigner: false, isWritable: false },
+    ],
+    data: initData,
+  });
 
-    // Check existence regardless of sig — confirm can return false negatives
+  // Send tx — kp must also sign
+  try {
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    const tx = new Transaction({ recentBlockhash: blockhash, feePayer: botKp.publicKey });
+    tx.add(new TransactionInstruction(createIx));
+    tx.add(initIx);
+    tx.sign(botKp, kp); // both signers required
+    const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true, maxRetries: 5 });
+    const result = await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+    if (result.value && result.value.err) {
+      console.error(`    [ata] manual create on-chain err: ${JSON.stringify(result.value.err)}`);
+      return null;
+    }
+    console.log(`    [ata] manual token account created: ${kp.publicKey.toBase58().slice(0,8)}... sig=${sig.slice(0,8)}...`);
     await sleep(2000);
-    try {
-      const ataInfo = await connection.getAccountInfo(ata);
-      if (ataInfo) {
-        console.log(`    [ata] ATA confirmed on-chain${sig ? '' : ' (despite confirm error)'}`);
-        return true;
-      }
-    } catch (_) {}
-
-    if (sig) return true; // sig without account means something weird — trust the sig
+    return { pubkey: kp.publicKey };
+  } catch (err) {
+    console.error(`    [ata] manual create failed: ${err.message || String(err)}`);
+    return null;
   }
-
-  console.error(`    [ata] all variants failed — ATA still does not exist`);
-  return false;
 }
 
 // ─── Ghost processing ─────────────────────────────────────────────────────────
@@ -624,10 +654,10 @@ async function runBeneficiaries(ghost, label, now) {
         if (ghost.wholeVaultAction === 0) {
           // Ensure recipient has a token account — sent as separate confirmed tx before transfer
           const recipientPk = new PublicKey(ghost.wholeVaultRecipient);
-          const ataOk = await ensureRecipientAta(recipientPk, mintPk, tokenProg);
-          if (!ataOk) { console.error(`    ❌ could not create recipient ATA for ${mintStr.slice(0,8)}... — skipping`); continue; }
-          // Transfer to recipient — pass actual vault token account pubkey
-          const transferIx = await buildExecuteWholeVaultTransfer(ghost, mintPk, tokenProg, vaultAta);
+          const recipientAcct = await ensureRecipientTokenAccount(recipientPk, mintPk, tokenProg);
+          if (!recipientAcct) { console.error(`    ❌ could not create recipient token account for ${mintStr.slice(0,8)}... — skipping`); continue; }
+          // Pass actual recipient token account pubkey to transfer builder
+          const transferIx = await buildExecuteWholeVaultTransfer(ghost, mintPk, tokenProg, vaultAta, recipientAcct.pubkey);
           const sig = await sendTx([transferIx], `execute_whole_vault_transfer[${mintStr.slice(0,8)}...](${label})`);
           if (sig) await verifyVaultDrained(vaultAta, mintStr);
         } else if (ghost.wholeVaultAction === 1) {
