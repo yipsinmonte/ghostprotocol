@@ -2866,7 +2866,7 @@ async function fetchOnChainHistory() {
     try {
       const res = await fetch(RPC_URL,{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({jsonrpc:'2.0',id:'batch',method:'getParsedTransactions',
-          params:[sigs40,{maxSupportedTransactionVersion:0,commitment:'confirmed'}]})});
+          params:[sigs40,{encoding:'jsonParsed',maxSupportedTransactionVersion:0,commitment:'confirmed'}]})});
       const d = await res.json(); txList = Array.isArray(d.result)?d.result:[];
     } catch(e) {}
     if (txList.filter(Boolean).length===0) {
@@ -3111,6 +3111,19 @@ async function fetchOnChainHistory() {
           }
         }
       } catch(_e) {}
+      // Fallback: if _entryMint still null, grab any mint from inner SPL transfer
+      if (!_entryMint && !_entryTokens) {
+        try {
+          const _innerFb = (tx?.meta?.innerInstructions||[]).flatMap(g=>g.instructions||[]);
+          for (const _ixfb of _innerFb) {
+            const _pfb = _ixfb.parsed;
+            if (_pfb && (_pfb.type==='transfer'||_pfb.type==='transferChecked')) {
+              const _mfb = _pfb.info?.mint||'';
+              if (_mfb) { _entryMint = _mfb; break; }
+            }
+          }
+        } catch(_e2) {}
+      }
             builtActivity.push({msg:label, tx:s.signature, ts, icon:rowIcon, _tokens: _entryTokens, _mint: _entryMint});
       // Always record a ping entry if the tx contains a ping instruction,
       // whether it's a standalone ping or bundled with a settings update
@@ -4813,11 +4826,19 @@ async function renderActivityLog() {
       // Cache results
       for (const st of synth) {
         if (st.symbol && !st.symbol.includes('…')) MINT_TO_SYMBOL[st.mint] = st.symbol;
-        // Inject into vaultTokens/walletTokens for tokenLogoEl to pick up via logoUrl arg
-        if (st.logoUrl) {
-          const existing = [...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(t=>t.mint===st.mint);
-          if (existing) { existing.logoUrl = st.logoUrl; existing.symbol = st.symbol; }
-          else ghostState.walletTokens = [...(ghostState.walletTokens||[]), { mint: st.mint, symbol: st.symbol, logoUrl: st.logoUrl, balance: 0 }];
+        // Inject into walletTokens so tokenLogoEl resolves via logoUrl
+        const existing = [...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(t=>t.mint===st.mint);
+        if (st.logoUrl || st.symbol) {
+          if (existing) { if (st.logoUrl) existing.logoUrl = st.logoUrl; if (st.symbol) existing.symbol = st.symbol; }
+          else ghostState.walletTokens = [...(ghostState.walletTokens||[]), { mint: st.mint, symbol: st.symbol, logoUrl: st.logoUrl||null, balance: 0 }];
+        }
+        // Backfill _mint on any entry whose msg contains this mint's truncated form
+        const s4 = st.mint.slice(0,4), e4 = st.mint.slice(-4);
+        const pats = [s4+'…'+e4, s4+'...'+e4];
+        for (const entry of ghostState.activityLog) {
+          if (!entry._mint && entry.msg && pats.some(p => entry.msg.includes(p))) {
+            entry._mint = st.mint;
+          }
         }
       }
     } catch(e) {}
@@ -4857,14 +4878,23 @@ async function renderActivityLog() {
     // Token transfer/burn rows — show token logo from _mint
     else if (entry._mint) iconHtml = mintLogoInline(entry._mint);
 
-    // Enrich msg: replace truncated mint addresses with resolved symbols
+    // Enrich msg: replace any truncated mint in msg with resolved symbol
     let msg = entry.msg || '';
-    if (entry._mint && MINT_TO_SYMBOL[entry._mint] && MINT_TO_SYMBOL[entry._mint] !== entry._mint) {
-      const shortMint = entry._mint.slice(0,4) + '\u2026' + entry._mint.slice(-4);
-      if (msg.includes(shortMint)) msg = msg.replace(shortMint, MINT_TO_SYMBOL[entry._mint]);
-      // Also replace longer truncations like "J5mW...pump"
-      const altShort = entry._mint.slice(0,4) + '...' + entry._mint.slice(-4);
-      if (msg.includes(altShort)) msg = msg.replace(altShort, MINT_TO_SYMBOL[entry._mint]);
+    // All mints we know about — from _mint, _tokens, and MINT_TO_SYMBOL
+    const _allMints = new Set();
+    if (entry._mint) _allMints.add(entry._mint);
+    if (entry._tokens) entry._tokens.forEach(t => t.mint && _allMints.add(t.mint));
+    for (const [mint, sym] of Object.entries(MINT_TO_SYMBOL)) {
+      if (sym && !sym.includes('…') && sym !== mint) _allMints.add(mint);
+    }
+    for (const mint of _allMints) {
+      const sym = MINT_TO_SYMBOL[mint];
+      if (!sym || sym.includes('…') || sym === mint || sym.length > 12) continue;
+      // Replace all truncation styles: "Ab1C…xyz9", "Ab1C...xyz9", "Ab1C_pump" (last 4)
+      const s4 = mint.slice(0,4), e4 = mint.slice(-4);
+      [s4+'…'+e4, s4+'...'+e4].forEach(pat => {
+        if (msg.includes(pat)) msg = msg.split(pat).join(sym);
+      });
     }
 
     const tdStyle = iconHtml ? ' style="display:flex;align-items:center"' : '';
