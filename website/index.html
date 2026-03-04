@@ -2060,33 +2060,34 @@ async function fetchGhostTokenPrice() {
 
   if (dexOk) return;
 
-  // ── 2. Jupiter v3 fallback (price only — no mcap/vol/change) ─
+  // ── 2. Jupiter v3 fallback (price + derived mcap from 1B fixed supply) ──────
+  const GHOST_TOTAL_SUPPLY = 1_000_000_000;
+  let jupPrice = 0;
   try {
     const r = await fetch(`https://api.jup.ag/price/v3?ids=${GHOST_MINT}`, {
       headers: { 'x-api-key': '8bef3e9f-8dca-495b-8b42-6df346fda48e' }
     });
     if (r.ok) {
       const data = await r.json();
-      const info = data?.[GHOST_MINT];
-      const price = info?.usdPrice ? parseFloat(info.usdPrice) : 0;
-      console.log('[Ghost] Jupiter fallback GHOST price:', price);
-      if (price > 0) {
-        setTicker(price, 0, 0, null);
-        return;
-      }
+      jupPrice = data?.[GHOST_MINT]?.usdPrice ? parseFloat(data[GHOST_MINT].usdPrice) : 0;
     }
-  } catch(e) { console.log('[Ghost] Jupiter fallback error:', e.message); }
+  } catch(e) { console.log('[Ghost] Jupiter v3 fallback error:', e.message); }
 
-  // ── 3. Jupiter v1 fallback ────────────────────────────────────
-  try {
-    const r = await fetch(`https://price.jup.ag/v4/price?ids=${GHOST_MINT}`);
-    if (r.ok) {
-      const data = await r.json();
-      const price = data?.data?.[GHOST_MINT]?.price || 0;
-      console.log('[Ghost] Jupiter v1 fallback GHOST price:', price);
-      if (price > 0) setTicker(price, 0, 0, null);
-    }
-  } catch(e) { console.log('[Ghost] Jupiter v1 fallback error:', e.message); }
+  // ── 3. Jupiter v4 fallback ────────────────────────────────────────────────────
+  if (!jupPrice) {
+    try {
+      const r = await fetch(`https://price.jup.ag/v4/price?ids=${GHOST_MINT}`);
+      if (r.ok) {
+        const data = await r.json();
+        jupPrice = data?.data?.[GHOST_MINT]?.price || 0;
+      }
+    } catch(e) { console.log('[Ghost] Jupiter v4 fallback error:', e.message); }
+  }
+
+  if (jupPrice > 0) {
+    console.log('[Ghost] Jupiter fallback GHOST price:', jupPrice);
+    setTicker(jupPrice, jupPrice * GHOST_TOTAL_SUPPLY, 0, null);
+  }
 }
 
 function updateMarketingTicker() {
