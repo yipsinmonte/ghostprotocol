@@ -4576,7 +4576,7 @@ function addActivityRow(msg, tx, icon) {
   renderActivityLog();
 }
 
-function renderExecutionDetail() {
+async function renderExecutionDetail() {
   const body = document.getElementById('dbExecDetailBody');
   const timeEl = document.getElementById('dbExecDetailTime');
   const stakeRow = document.getElementById('dbExecStakeRow');
@@ -4600,65 +4600,93 @@ function renderExecutionDetail() {
     if (stake > 0) stakeEl.textContent = stake.toLocaleString();
   }
 
-  // ── Build distribution lines ──
-  // Each line: { action, token, amount, recipient, recipientFull, logoUrl, status, mint }
-  const lines = [];
-  const benes = g.beneficiaries || [];
+  // ── Build raw token list from activity log _tokens ──
   const wholeRecipient = g.wholeVaultRecipient;
   const wholeAction = g.wholeVaultAction;
+  const benes = g.beneficiaries || [];
+
+  // Collect all unique mints we'll display
+  const mintMap = {}; // mint -> { symbol, amount, logoUrl }
+
+  if (wholeRecipient) {
+    const wvEntries = log.filter(e => e._tokens && e._tokens.length > 0);
+    const seen = new Set();
+    for (const entry of wvEntries) {
+      for (const t of entry._tokens) {
+        if (!seen.has(t.mint)) {
+          seen.add(t.mint);
+          mintMap[t.mint] = { symbol: t.symbol, amount: t.amount, logoUrl: t.logoUrl || null };
+        }
+      }
+    }
+    // Fallback to vaultTokens
+    if (Object.keys(mintMap).length === 0) {
+      for (const t of (ghostState.vaultTokens || [])) {
+        mintMap[t.mint] = { symbol: t.symbol, amount: t.balance, logoUrl: t.logoUrl || null };
+      }
+    }
+  }
+
+  for (const b of benes.filter(b => b.action !== 'whole-vault-share' && b.mint)) {
+    if (!mintMap[b.mint]) mintMap[b.mint] = { symbol: b.token, amount: b.amount, logoUrl: null };
+  }
+
+  // ── Fetch metadata for any mints missing logo or proper symbol ──
+  const mintsNeedingMeta = Object.entries(mintMap)
+    .filter(([mint, t]) => !t.logoUrl || !t.symbol || t.symbol.includes('…') || t.symbol.length > 12)
+    .map(([mint]) => mint);
+
+  if (mintsNeedingMeta.length > 0) {
+    body.innerHTML = '<div style="padding:20px 18px;font-family:monospace;font-size:11px;color:#4a4a6a;letter-spacing:0.1em">Resolving tokens...</div>';
+    // Build synthetic token objects for fetchTokenMetadata
+    const syntheticTokens = Object.entries(mintMap).map(([mint, t]) => ({
+      mint, symbol: t.symbol || mint.slice(0,4)+'...'+mint.slice(-4), logoUrl: t.logoUrl, name: ''
+    }));
+    try {
+      await fetchTokenMetadata(syntheticTokens, mintsNeedingMeta);
+      // Merge results back into mintMap
+      for (const st of syntheticTokens) {
+        if (mintMap[st.mint]) {
+          mintMap[st.mint].symbol = st.symbol;
+          mintMap[st.mint].logoUrl = st.logoUrl || mintMap[st.mint].logoUrl;
+          // Also cache in MINT_TO_SYMBOL
+          if (st.symbol && !st.symbol.includes('...')) MINT_TO_SYMBOL[st.mint] = st.symbol;
+        }
+      }
+    } catch(e) { console.warn('[Ghost] Execution detail metadata fetch failed:', e); }
+  }
+
+  // ── Build distribution lines ──
+  const lines = [];
 
   if (wholeRecipient) {
     const shortR = wholeRecipient.slice(0,4)+'...'+wholeRecipient.slice(-4);
     const action = wholeAction === 1 ? 'burn' : 'transfer';
-
-    // Priority 1: tokens stored on activity log entries (from inner SPL transfers at tx time)
-    const wvEntries = log.filter(e => e._tokens && e._tokens.length > 0);
-    // Dedupe by mint across all whole-vault tx entries
-    const wvMintSeen = new Set();
-    const wvTokens = [];
-    for (const entry of wvEntries) {
-      for (const t of entry._tokens) {
-        if (!wvMintSeen.has(t.mint)) { wvMintSeen.add(t.mint); wvTokens.push(t); }
-      }
-    }
-
-    // Priority 2: vaultTokens (populated before execution — may be empty if vault drained)
-    const vt = wvTokens.length > 0 ? wvTokens : (ghostState.vaultTokens || []).map(t => ({
-      symbol: t.symbol, mint: t.mint, amount: t.balance, logoUrl: t.logoUrl
-    }));
-
-    if (vt.length > 0) {
-      for (const t of vt) {
-        const { sym, logoUrl } = resolveMintLogo(t.mint);
-        lines.push({ action, token: t.symbol || sym || t.token || '?', amount: t.amount, recipient: shortR, recipientFull: wholeRecipient, logoUrl: t.logoUrl || logoUrl, status: 'complete', mint: t.mint });
+    if (Object.keys(mintMap).length > 0) {
+      for (const [mint, t] of Object.entries(mintMap)) {
+        lines.push({ action, token: t.symbol || mint.slice(0,4)+'…'+mint.slice(-4), amount: t.amount, recipient: shortR, recipientFull: wholeRecipient, logoUrl: t.logoUrl, status: 'complete', mint });
       }
     } else {
-      // Last resort: parse token info from activity log msg strings
-      // Format: "🪙 1,000 USDC → 7mYh..." or "🔥 500 $GHOST burned"
-      const parsedFromMsg = [];
-      for (const entry of log.filter(e => e.msg && (e.msg.includes('vault') || e.msg.includes('Whole')))) {
-        const parts = entry.msg.split(' · ');
-        for (const part of parts) {
-          const m = part.match(/[🪙🔥]\s+([\d,\.]+)\s+(\S+)\s+(?:→|burned)/);
-          if (m) parsedFromMsg.push({ token: m[2], amount: parseFloat(m[1].replace(/,/g,'')), mint: null, logoUrl: null });
-        }
-      }
-      if (parsedFromMsg.length > 0) {
-        for (const t of parsedFromMsg) lines.push({ action, token: t.token, amount: t.amount, recipient: shortR, recipientFull: wholeRecipient, logoUrl: null, status: 'complete', mint: null });
-      } else {
-        lines.push({ action, token: 'All tokens', amount: null, recipient: shortR, recipientFull: wholeRecipient, status: 'complete' });
-      }
+      lines.push({ action, token: 'All tokens', amount: null, recipient: shortR, recipientFull: wholeRecipient, status: 'complete' });
     }
   }
 
   for (const b of benes.filter(b => b.action !== 'whole-vault-share')) {
     const shortR = b.fullAddr ? b.fullAddr.slice(0,4)+'...'+b.fullAddr.slice(-4) : (b.recipient || '—');
-    const { sym: _s, logoUrl } = b.mint ? resolveMintLogo(b.mint) : { sym: b.token, logoUrl: null };
-    lines.push({ action: b.action === 'burn' ? 'burn' : 'transfer', token: b.token || _s || '?', amount: b.amount, recipient: shortR, recipientFull: b.fullAddr || '', logoUrl, status: b.executed ? 'complete' : 'pending', mint: b.mint });
+    const mt = b.mint ? mintMap[b.mint] : null;
+    lines.push({
+      action: b.action === 'burn' ? 'burn' : 'transfer',
+      token: mt?.symbol || b.token || '?',
+      amount: b.amount,
+      recipient: shortR, recipientFull: b.fullAddr || '',
+      logoUrl: mt?.logoUrl || null,
+      status: b.executed ? 'complete' : 'pending',
+      mint: b.mint
+    });
   }
 
   if (lines.length === 0) {
-    body.innerHTML = `<div style="padding:28px 18px;text-align:center;font-family:'Share Tech Mono',monospace;font-size:11px;color:#3a3a5a;letter-spacing:0.1em">No distribution data · refresh to load from chain</div>`;
+    body.innerHTML = '<div style="padding:28px 18px;text-align:center;font-family:monospace;font-size:11px;color:#3a3a5a;letter-spacing:0.1em">No distribution data · refresh to load from chain</div>';
     return;
   }
 
@@ -4680,39 +4708,27 @@ function renderExecutionDetail() {
     const isLast = gi === entries.length - 1;
     const borderB = isLast ? '' : 'border-bottom:1px solid rgba(255,255,255,0.05);';
 
-    // Calc USD total for this group
-    let groupUsd = 0;
-    for (const t of grp.tokens) {
-      const price = t.mint ? (PRICE_CACHE[t.mint] || 0) : 0;
-      if (price > 0 && t.amount) groupUsd += price * t.amount;
-    }
-    const usdStr = groupUsd > 0.01 ? ' · <span style="color:#5a5a7a">≈ $' + groupUsd.toLocaleString(undefined,{maximumFractionDigits:2}) + '</span>' : '';
-
     const statusChip = grp.allDone
-      ? `<span style="font-family:'Share Tech Mono',monospace;font-size:9px;padding:2px 8px;letter-spacing:0.14em;background:rgba(51,255,153,0.06);border:1px solid rgba(51,255,153,0.18);color:#33ff99">${isBurn ? 'BURNED' : 'SENT'}</span>`
-      : `<span style="font-family:'Share Tech Mono',monospace;font-size:9px;padding:2px 8px;letter-spacing:0.14em;background:rgba(255,170,51,0.06);border:1px solid rgba(255,170,51,0.18);color:#ffaa33">PENDING</span>`;
+      ? '<span style="font-family:monospace;font-size:9px;padding:2px 8px;letter-spacing:0.14em;background:rgba(51,255,153,0.06);border:1px solid rgba(51,255,153,0.18);color:#33ff99">' + (isBurn ? 'BURNED' : 'SENT') + '</span>'
+      : '<span style="font-family:monospace;font-size:9px;padding:2px 8px;letter-spacing:0.14em;background:rgba(255,170,51,0.06);border:1px solid rgba(255,170,51,0.18);color:#ffaa33">PENDING</span>';
 
     const destLabel = isBurn
-      ? `<span style="font-size:11px">🔥</span><span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#ff7755">Burned</span>`
-      : `<span style="font-size:10px;color:#5a5a7a">→</span><span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#c0bce0" title="${grp.recipientFull}">${grp.recipient}</span>`;
+      ? '<span style="font-size:11px">&#x1F525;</span><span style="font-family:monospace;font-size:11px;color:#ff7755"> Burned</span>'
+      : '<span style="font-size:10px;color:#5a5a7a">\u2192</span><span style="font-family:monospace;font-size:11px;color:#c0bce0" title="' + grp.recipientFull + '"> ' + grp.recipient + '</span>';
 
-    html += `<div style="padding:16px 20px;${borderB}">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:6px;flex:1">${destLabel}${usdStr}</div>
-        ${statusChip}
-      </div>`;
+    html += '<div style="padding:16px 20px;' + borderB + '">'
+          + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">'
+          + '<div style="display:flex;align-items:center;gap:6px;flex:1">' + destLabel + '</div>'
+          + statusChip
+          + '</div>';
 
-    // Token rows — with logo
     for (const tk of grp.tokens) {
       const amtRaw = tk.amount;
       const amtStr = amtRaw != null
         ? (amtRaw >= 1000
             ? Number(amtRaw).toLocaleString(undefined,{maximumFractionDigits:2})
             : parseFloat(Number(amtRaw).toPrecision(5)).toString())
-        : '—';
-      const price = tk.mint ? (PRICE_CACHE[tk.mint] || 0) : 0;
-      const usdVal = (price > 0 && amtRaw) ? (' ≈ $' + (price * amtRaw).toLocaleString(undefined,{maximumFractionDigits:2})) : '';
-      const usdTk = usdVal ? ('<span style="font-size:10px;color:#4a4a6a">' + usdVal + '</span>') : '';
+        : '\u2014';
       const _tkSym = tk.token === 'All tokens' ? 'Whole Vault' : tk.token;
       const logoHtml = tokenLogoEl(_tkSym, 22, tk.logoUrl || null);
       const tokenCol = isBurn ? '#ff8866' : (typeof tokenColor === 'function' ? tokenColor(tk.token) : '#c0bce0');
@@ -4724,25 +4740,16 @@ function renderExecutionDetail() {
             + '<div style="font-size:12px;color:#e0dcf8;font-family:monospace">'
             +   '<span style="color:#f0f0f8;font-weight:600">' + amtStr + '</span> '
             +   '<span style="color:' + tokenCol + '">' + tk.token + '</span>'
-            +   usdTk
             + '</div>'
             + pendingBadge
             + '</div>';
     }
+
+    html += '</div>';
   }
 
   body.innerHTML = html;
-
-  // Update total USD
-  const totalUsdEl = document.getElementById('dbExecTotalValue');
-  if (totalUsdEl) {
-    let totalUsd = 0;
-    for (const l of lines) {
-      const price = l.mint ? (PRICE_CACHE[l.mint] || 0) : 0;
-      if (price > 0 && l.amount) totalUsd += price * l.amount;
-    }
-    totalUsdEl.textContent = totalUsd > 0.01 ? '≈ $' + totalUsd.toLocaleString(undefined,{maximumFractionDigits:2}) : '';
-  }
+  document.getElementById('dbExecTotalValue') && (document.getElementById('dbExecTotalValue').textContent = '');
 }
 
 
