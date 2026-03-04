@@ -837,41 +837,47 @@
           </div>
         </div>
 
-        <!-- Executed ghost: full-page takeover panel, hidden for non-executed ghosts -->
+        <!-- Executed ghost panel — hidden for non-executed ghosts, replaces normal overview content -->
         <div id="dbExecutedPanel" style="display:none;margin-bottom:24px">
 
-          <!-- Skull header — subdued, not red-blasted -->
-          <div style="text-align:center;padding:28px 20px 20px;position:relative">
-            <div style="font-size:52px;margin-bottom:10px;filter:grayscale(0.3) brightness(0.85)">💀</div>
-            <div style="font-family:'Syne',sans-serif;font-weight:900;font-size:18px;letter-spacing:0.12em;color:#d0d0e8">GHOST EXECUTED</div>
-            <div id="dbExecDetailTime" style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#5a5a7a;letter-spacing:0.15em;margin-top:4px;text-transform:uppercase"></div>
+          <!-- Header: clean, dark, not red-blasted -->
+          <div style="position:relative;padding:32px 24px 24px;text-align:center;background:linear-gradient(180deg,rgba(20,10,35,0.8) 0%,transparent 100%);border-bottom:1px solid rgba(255,255,255,0.04);margin-bottom:20px">
+            <!-- Subtle heartbeat flatline decoration -->
+            <div style="position:absolute;top:18px;left:0;right:0;height:1px;overflow:hidden;opacity:0.15">
+              <svg width="100%" height="24" viewBox="0 0 400 24" preserveAspectRatio="none">
+                <polyline points="0,12 80,12 100,2 115,22 130,12 200,12 220,2 235,22 250,12 400,12" fill="none" stroke="#a080ff" stroke-width="1.5"/>
+              </svg>
+            </div>
+            <div style="font-size:44px;margin-bottom:12px;opacity:0.7">💀</div>
+            <div style="font-family:'Syne',sans-serif;font-weight:900;font-size:20px;letter-spacing:0.14em;color:#e8e4f8;margin-bottom:4px">GHOST EXECUTED</div>
+            <div id="dbExecDetailTime" style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#5050708;letter-spacing:0.2em;color:#6060888"></div>
           </div>
 
-          <!-- Distribution report card -->
-          <div style="border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);margin-bottom:2px;overflow:hidden">
-            <div style="padding:10px 18px;background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:space-between">
-              <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.18em;color:#7070a0">DISTRIBUTION REPORT</div>
-              <div id="dbExecTotalValue" style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#5a5a7a"></div>
+          <!-- Distribution report — the main event -->
+          <div style="margin-bottom:16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding:0 2px">
+              <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.2em;color:#6060a0">LEGACY DISTRIBUTION</div>
+              <div id="dbExecTotalValue" style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#6060a0"></div>
             </div>
-            <div id="dbExecDetailBody">
+            <div id="dbExecDetailBody" style="border:1px solid rgba(255,255,255,0.06);background:rgba(10,8,24,0.6);overflow:hidden">
               <div style="padding:20px 18px;font-family:'Share Tech Mono',monospace;font-size:12px;color:#4a4a6a">Loading...</div>
             </div>
           </div>
 
-          <!-- Stake locked row -->
-          <div id="dbExecStakeRow" style="display:none;border:1px solid rgba(102,51,255,0.12);background:rgba(102,51,255,0.04);padding:14px 18px;margin-bottom:2px;display:flex;align-items:center;gap:12px">
-            <div style="width:32px;height:32px;border-radius:50%;background:rgba(102,51,255,0.12);border:1px solid rgba(102,51,255,0.25);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px">💎</div>
+          <!-- Stake locked — compact -->
+          <div id="dbExecStakeRow" style="display:none;border:1px solid rgba(102,51,255,0.15);background:rgba(102,51,255,0.05);padding:13px 18px;display:flex;align-items:center;gap:12px;margin-bottom:4px">
+            <div style="font-size:18px;opacity:0.7">💎</div>
             <div style="flex:1;min-width:0">
-              <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#a080ff"><strong id="dbExecutedStake">—</strong> $GHOST</div>
-              <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#5a5a7a;margin-top:2px">Staked · locked in vault · reclaim via Abandon Ghost (50% burn)</div>
+              <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#b090ff"><strong id="dbExecutedStake">—</strong> $GHOST staked · locked on-chain</div>
+              <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#5050808;margin-top:2px;color:#4a4a6a">Reclaim via Abandon Ghost — 50% burn penalty applies</div>
             </div>
-            <button onclick="dbAbandonOnChain()" style="background:rgba(102,51,255,0.1);border:1px solid rgba(102,51,255,0.3);color:#a080ff;font-family:'Share Tech Mono',monospace;font-size:10px;padding:6px 12px;cursor:pointer;letter-spacing:0.08em;white-space:nowrap;flex-shrink:0">RECLAIM</button>
+            <button onclick="dbAbandonOnChain()" style="background:transparent;border:1px solid rgba(102,51,255,0.35);color:#a080ff;font-family:'Share Tech Mono',monospace;font-size:10px;padding:5px 12px;cursor:pointer;letter-spacing:0.1em;white-space:nowrap;flex-shrink:0">RECLAIM →</button>
           </div>
 
         </div>
 
         <!-- keep dbExecutedAlert id for JS compat but invisible — replaced by panel above -->
-        <div id="dbExecutedAlert" style="display:none"><strong id="dbExecutedStake_compat"></strong></div>
+        <div id="dbExecutedAlert" style="display:none"></div>
 
         <div class="status-hero">
           <div>
@@ -1893,6 +1899,24 @@ const SYMBOL_TO_MINT = {
   'native': SOL_MINT, // native SOL
 };
 
+// Reverse lookup: mint → symbol. Built from SYMBOL_TO_MINT + updated dynamically from vaultTokens/walletTokens
+const MINT_TO_SYMBOL = {};
+for (const [sym, mint] of Object.entries(SYMBOL_TO_MINT)) { if (mint && !MINT_TO_SYMBOL[mint]) MINT_TO_SYMBOL[mint] = sym; }
+MINT_TO_SYMBOL['k4MxJAdy22Dgd2UTQ9p3etbnaSLUH1q5cEfSRi6pump'] = '$GHOST';
+function resolveMintSymbol(mint) {
+  if (!mint) return '';
+  if (MINT_TO_SYMBOL[mint]) return MINT_TO_SYMBOL[mint];
+  // Try vaultTokens and walletTokens live
+  const found = [...(ghostState.vaultTokens||[]), ...(ghostState.walletTokens||[])].find(t => t.mint === mint);
+  if (found?.symbol) { MINT_TO_SYMBOL[mint] = found.symbol; return found.symbol; }
+  return mint.slice(0,4)+'…'+mint.slice(-4);
+}
+function resolveMintLogo(mint) {
+  const sym = resolveMintSymbol(mint);
+  const found = [...(ghostState.vaultTokens||[]), ...(ghostState.walletTokens||[])].find(t => t.mint === mint);
+  return { sym, logoUrl: found?.logoUrl || null };
+}
+
 let ghostPriceUsd = 0;
 
 function getTokenPrice(token) {
@@ -2896,9 +2920,8 @@ async function fetchOnChainHistory() {
             const info=p.info||{};
             const amt=info.tokenAmount?.uiAmountString||info.amount;
             const mint=info.mint||'';
-            const known=[...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(t=>t.mint===mint);
             const _wsolMint='So11111111111111111111111111111111111111112';
-            const sym=known?.symbol||((mint===_wsolMint||mint==='native')?'SOL':mint?mint.slice(0,6):'');
+            const sym=resolveMintSymbol(mint)||(mint===_wsolMint||mint==='native'?'SOL':mint?mint.slice(0,4)+'…'+mint.slice(-4):'');
             if (amt&&sym) {
               const n=parseFloat(amt);
               const fmt=n>=1000?n.toLocaleString(undefined,{maximumFractionDigits:2}):parseFloat(n.toPrecision(4)).toString();
@@ -2963,7 +2986,8 @@ async function fetchOnChainHistory() {
           const bene = (ghostState.ghost?.beneficiaries||[])[bIdx];
           if (bene) {
             const shortR = bene.fullAddr ? bene.fullAddr.slice(0,4)+'...'+bene.fullAddr.slice(-4) : (bene.recipient||'');
-            return `📤 Transfer executed · ${bene.amount||''} ${bene.token||''} → ${shortR}`;
+            const _amt = bene.amount ? (bene.amount >= 1000 ? bene.amount.toLocaleString(undefined,{maximumFractionDigits:2}) : parseFloat(bene.amount.toPrecision(4)).toString()) : '';
+            return `🪙 ${_amt} ${bene.token||''} → ${shortR}`;
           }
         } catch(_) {}
         return '📤 Token transfer executed';
@@ -2978,7 +3002,7 @@ async function fetchOnChainHistory() {
           const full_b=[...new Array(leading_b).fill(0),...bytes_b];
           const bIdxB = full_b[8];
           const beneB = (ghostState.ghost?.beneficiaries||[])[bIdxB];
-          if (beneB) return `🔥 Burn executed · ${beneB.amount||''} ${beneB.token||''} → 🔥`;
+          if (beneB) { const _a = beneB.amount ? (beneB.amount >= 1000 ? beneB.amount.toLocaleString(undefined,{maximumFractionDigits:2}) : parseFloat(beneB.amount.toPrecision(4)).toString()) : ''; return `🔥 ${_a} ${beneB.token||''} burned`; }
         } catch(_) {}
         return '🔥 Token burn executed';
       }
@@ -2988,7 +3012,7 @@ async function fetchOnChainHistory() {
         const wvr = ghostState.ghost?.wholeVaultRecipient;
         const shortWv = wvr ? wvr.slice(0,4)+'...'+wvr.slice(-4) : '';
         // Pull token amounts from inner parsed transfer instructions
-        const _wsolMint = 'So11111111111111111111111111111111111111112';
+        const _wsolMint2 = 'So11111111111111111111111111111111111111112';
         const tokenParts = [];
         for (const ix of inner) {
           const p = ix.parsed;
@@ -2996,23 +3020,24 @@ async function fetchOnChainHistory() {
             const info = p.info || {};
             const amt = info.tokenAmount?.uiAmountString || info.amount;
             const mint = info.mint || '';
-            const known = [...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(t=>t.mint===mint);
-            const sym = known?.symbol || (mint===_wsolMint ? 'wSOL' : mint ? mint.slice(0,6)+'…' : '');
+            const sym = resolveMintSymbol(mint) || (mint===_wsolMint2 ? 'wSOL' : '');
+            const dest2 = isBurnWv ? '🔥' : (shortWv || '?');
             if (amt && sym) {
               const n = parseFloat(amt);
               const fmt = n >= 1000 ? n.toLocaleString(undefined,{maximumFractionDigits:2}) : parseFloat(n.toPrecision(4)).toString();
-              tokenParts.push(`${fmt} ${sym}`);
+              tokenParts.push({ fmt, sym, dest: dest2 });
             }
           }
         }
-        if (isBurnWv) {
-          return tokenParts.length > 0 ? `🔥 Whole vault burned · ${tokenParts.join(' · ')}` : '🔥 Whole vault burn executed';
+        if (tokenParts.length > 0) {
+          // One line per token: "1,000 USDC → 7mYh... · 0.001 wSOL → 7mYh..."
+          return tokenParts.map(t => `${isBurnWv ? '🔥' : '🪙'} ${t.fmt} ${t.sym}${isBurnWv ? ' burned' : ` → ${t.dest}`}`).join(' · ');
         }
         const dest = shortWv ? ` → ${shortWv}` : '';
-        return tokenParts.length > 0 ? `📤 Whole vault transfer${dest} · ${tokenParts.join(' · ')}` : `📤 Whole vault transfer${dest}`;
+        return isBurnWv ? '🔥 Vault burn executed' : `🪙 Vault transfer${dest}`;
       }
-      if (matchHex === '4740f97b68dcbc90') return '💀 Ghost executed by protocol';
-      if (matchHex === 'ca3ef808ddc9e69e') return '⏰ Silence detected — Ghost awakened by bot';
+      if (matchHex === '4740f97b68dcbc90') return '💀 Ghost protocol executed';
+      if (matchHex === 'ca3ef808ddc9e69e') return '⏰ Ghost awakened — silence detected';
       return baseLabel;
     }
     const builtActivity=[], rawPings=[];
@@ -4528,157 +4553,105 @@ function renderExecutionDetail() {
   const g = ghostState.ghost;
   const log = ghostState.activityLog || [];
 
-  // ── Timestamp from activity log ──
-  const execMsgs = ['executed', 'transfer executed', 'burn executed', 'Silence detected', 'Whole vault', 'Ghost executed'];
-  const execEvents = log.filter(e => e.msg && execMsgs.some(m => e.msg.includes(m)));
+  // ── Timestamp ──
+  const execEvents = log.filter(e => e.msg && ['executed','transfer executed','burn executed','Silence detected','Ghost executed','vault burn','vault transfer'].some(m => e.msg.includes(m)));
   if (execEvents.length > 0 && timeEl) {
     const latest = Math.max(...execEvents.map(e => e.ts || 0));
-    if (latest > 0) {
-      timeEl.textContent = 'Executed ' + new Date(latest).toLocaleDateString(undefined, {day:'numeric', month:'short', year:'numeric'});
-    }
+    if (latest > 0) timeEl.textContent = new Date(latest).toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'long', year:'numeric'});
   }
 
-  // ── Stake row ──
+  // ── Stake ──
   if (stakeRow && stakeEl) {
     const stake = g.stakedGhost || 0;
-    if (stake > 0) {
-      stakeEl.textContent = stake.toLocaleString();
-      stakeRow.style.display = 'flex';
-    } else {
-      stakeRow.style.display = 'none';
-    }
+    stakeRow.style.display = stake > 0 ? 'flex' : 'none';
+    if (stake > 0) stakeEl.textContent = stake.toLocaleString();
   }
 
-  // ── Collect all distribution lines ──
-  // We build a list of { icon, label, token, amount, recipient, status, txSig }
+  // ── Build distribution lines ──
+  // Each line: { action, token, amount, recipient, recipientFull, logoUrl, status, mint }
   const lines = [];
-
   const benes = g.beneficiaries || [];
   const wholeRecipient = g.wholeVaultRecipient;
   const wholeAction = g.wholeVaultAction;
 
-  // Whole vault: pull per-token amounts from activity log tx data
-  // Each whole_vault tx in the log carries its label — we parse token+amount from it
   if (wholeRecipient) {
     const shortR = wholeRecipient.slice(0,4)+'...'+wholeRecipient.slice(-4);
-    const wvLabel = wholeAction === 1 ? 'Whole vault burn' : 'Whole vault transfer';
-    // Find whole-vault tx entries in log that have token detail
-    const wvEntries = log.filter(e => e.msg && (e.msg.includes('Whole vault') || e.msg.includes('whole vault')));
-    // Also check if activityLog has per-token breakdown attached
-    const wvTxEntries = log.filter(e => e._wvTokens);
-
-    if (wvTxEntries.length > 0) {
-      // Detailed per-token breakdown available
-      for (const entry of wvTxEntries) {
-        for (const tk of entry._wvTokens) {
-          lines.push({
-            action: wholeAction === 1 ? 'burn' : 'transfer',
-            token: tk.symbol,
-            amount: tk.amount,
-            recipient: wholeAction === 1 ? null : shortR,
-            recipientFull: wholeRecipient,
-            status: 'complete',
-            tx: entry.tx,
-            source: 'whole_vault',
-          });
-        }
+    const vt = ghostState.vaultTokens || [];
+    if (vt.length > 0) {
+      for (const t of vt) {
+        const { sym, logoUrl } = resolveMintLogo(t.mint);
+        lines.push({ action: wholeAction === 1 ? 'burn' : 'transfer', token: t.symbol || sym, amount: t.balance, recipient: shortR, recipientFull: wholeRecipient, logoUrl: t.logoUrl || logoUrl, status: 'complete', mint: t.mint });
       }
     } else {
-      // Fallback: show vault tokens we know about (from vaultTokens before execution)
-      const vt = ghostState.vaultTokens || [];
-      if (vt.length > 0) {
-        for (const t of vt) {
-          lines.push({
-            action: wholeAction === 1 ? 'burn' : 'transfer',
-            token: t.symbol,
-            amount: t.balance,
-            recipient: wholeAction === 1 ? null : shortR,
-            recipientFull: wholeRecipient,
-            status: 'complete',
-            source: 'whole_vault',
-          });
-        }
-      } else {
-        // No token info — show generic whole vault entry
-        lines.push({
-          action: wholeAction === 1 ? 'burn' : 'transfer',
-          token: 'All tokens',
-          amount: null,
-          recipient: wholeAction === 1 ? null : shortR,
-          recipientFull: wholeRecipient,
-          status: 'complete',
-          source: 'whole_vault',
-        });
-      }
+      lines.push({ action: wholeAction === 1 ? 'burn' : 'transfer', token: 'All tokens', amount: null, recipient: shortR, recipientFull: wholeRecipient, status: 'complete' });
     }
   }
 
-  // Individual beneficiaries
   for (const b of benes.filter(b => b.action !== 'whole-vault-share')) {
     const shortR = b.fullAddr ? b.fullAddr.slice(0,4)+'...'+b.fullAddr.slice(-4) : (b.recipient || '—');
-    lines.push({
-      action: b.action === 'burn' ? 'burn' : 'transfer',
-      token: b.token || '?',
-      amount: b.amount,
-      recipient: b.action === 'burn' ? null : shortR,
-      recipientFull: b.fullAddr || '',
-      status: b.executed ? 'complete' : 'pending',
-      source: 'bene',
-    });
+    const { sym: _s, logoUrl } = b.mint ? resolveMintLogo(b.mint) : { sym: b.token, logoUrl: null };
+    lines.push({ action: b.action === 'burn' ? 'burn' : 'transfer', token: b.token || _s || '?', amount: b.amount, recipient: shortR, recipientFull: b.fullAddr || '', logoUrl, status: b.executed ? 'complete' : 'pending', mint: b.mint });
   }
 
   if (lines.length === 0) {
-    body.innerHTML = `<div style="padding:24px 18px;font-family:'Share Tech Mono',monospace;font-size:12px;color:#4a4a6a;text-align:center">
-      No distribution data — refresh to load from chain.
-    </div>`;
+    body.innerHTML = `<div style="padding:28px 18px;text-align:center;font-family:'Share Tech Mono',monospace;font-size:11px;color:#3a3a5a;letter-spacing:0.1em">No distribution data · refresh to load from chain</div>`;
     return;
   }
 
-  // Group by recipient for cleaner display
-  const byRecipient = {};
+  // ── Group by recipient ──
+  const groups = {};
   for (const l of lines) {
     const key = l.recipientFull || '__burn__';
-    if (!byRecipient[key]) byRecipient[key] = { action: l.action, recipient: l.recipient, recipientFull: l.recipientFull, tokens: [], allComplete: true };
-    byRecipient[key].tokens.push({ token: l.token, amount: l.amount, status: l.status });
-    if (l.status !== 'complete') byRecipient[key].allComplete = false;
+    if (!groups[key]) groups[key] = { action: l.action, recipient: l.recipient, recipientFull: l.recipientFull, tokens: [], allDone: true };
+    groups[key].tokens.push(l);
+    if (l.status !== 'complete') groups[key].allDone = false;
   }
 
+  const entries = Object.entries(groups);
   let html = '';
-  const groups = Object.entries(byRecipient);
 
-  for (let gi = 0; gi < groups.length; gi++) {
-    const [key, grp] = groups[gi];
+  for (let gi = 0; gi < entries.length; gi++) {
+    const [key, grp] = entries[gi];
     const isBurn = key === '__burn__' || grp.action === 'burn';
-    const isLast = gi === groups.length - 1;
+    const isLast = gi === entries.length - 1;
+    const borderB = isLast ? '' : 'border-bottom:1px solid rgba(255,255,255,0.05);';
 
-    const recipientLabel = isBurn
-      ? '<span style="color:#ff6644">🔥 Burned</span>'
-      : `<span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#9090c0" title="${grp.recipientFull}">→ ${grp.recipient}</span>`;
+    // Calc USD total for this group
+    let groupUsd = 0;
+    for (const t of grp.tokens) {
+      const price = t.mint ? (PRICE_CACHE[t.mint] || 0) : 0;
+      if (price > 0 && t.amount) groupUsd += price * t.amount;
+    }
+    const usdStr = groupUsd > 0.01 ? ' · <span style="color:#5a5a7a">≈ $' + groupUsd.toLocaleString(undefined,{maximumFractionDigits:2}) + '</span>' : '';
 
-    const statusChip = grp.allComplete
-      ? `<span style="font-family:'Share Tech Mono',monospace;font-size:9px;padding:2px 8px;letter-spacing:0.12em;background:rgba(51,255,153,0.07);border:1px solid rgba(51,255,153,0.2);color:#33ff99">${isBurn ? 'BURNED' : 'SENT'}</span>`
-      : `<span style="font-family:'Share Tech Mono',monospace;font-size:9px;padding:2px 8px;letter-spacing:0.12em;background:rgba(255,153,51,0.07);border:1px solid rgba(255,153,51,0.2);color:#ff9933">PENDING</span>`;
+    const statusChip = grp.allDone
+      ? `<span style="font-family:'Share Tech Mono',monospace;font-size:9px;padding:2px 8px;letter-spacing:0.14em;background:rgba(51,255,153,0.06);border:1px solid rgba(51,255,153,0.18);color:#33ff99">${isBurn ? 'BURNED' : 'SENT'}</span>`
+      : `<span style="font-family:'Share Tech Mono',monospace;font-size:9px;padding:2px 8px;letter-spacing:0.14em;background:rgba(255,170,51,0.06);border:1px solid rgba(255,170,51,0.18);color:#ffaa33">PENDING</span>`;
 
-    html += `<div style="padding:14px 18px;${isLast ? '' : 'border-bottom:1px solid rgba(255,255,255,0.04)'}">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div style="display:flex;align-items:center;gap:8px">${recipientLabel}</div>
+    const destLabel = isBurn
+      ? `<span style="font-size:11px">🔥</span><span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#ff7755">Burned</span>`
+      : `<span style="font-size:10px;color:#5a5a7a">→</span><span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#c0bce0" title="${grp.recipientFull}">${grp.recipient}</span>`;
+
+    html += `<div style="padding:16px 20px;${borderB}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:6px;flex:1">${destLabel}${usdStr}</div>
         ${statusChip}
       </div>`;
 
-    // Token rows
+    // Token rows — with logo
     for (const tk of grp.tokens) {
-      const amtStr = tk.amount != null
-        ? typeof tk.amount === 'number'
-          ? tk.amount >= 1000 ? tk.amount.toLocaleString(undefined,{maximumFractionDigits:2}) : tk.amount.toPrecision(4).replace(/\.?0+$/, '')
-          : String(tk.amount)
-        : '';
-      const tokenColor = isBurn ? '#ff8866' : '#c0b8f8';
-      html += `<div style="display:flex;align-items:center;gap:10px;padding:5px 0">
-        <div style="width:4px;height:4px;border-radius:50%;background:${isBurn ? 'rgba(255,100,50,0.5)' : 'rgba(160,128,255,0.4)'};flex-shrink:0"></div>
-        <div style="flex:1;font-family:'Share Tech Mono',monospace;font-size:12px;color:#d0cce8">
-          ${amtStr ? `<span style="color:#f0f0f8;font-weight:600">${amtStr}</span> ` : ''}<span style="color:${tokenColor}">${tk.token}</span>
-        </div>
-        ${tk.status === 'pending' ? `<span style="font-family:'Share Tech Mono',monospace;font-size:9px;color:#6a6a8a">PENDING</span>` : ''}
+      const amtRaw = tk.amount;
+      const amtStr = amtRaw != null
+        ? (amtRaw >= 1000 ? Number(amtRaw).toLocaleString(undefined,{maximumFractionDigits:2}) : parseFloat(Number(amtRaw).toPrecision(5)).toString())
+        : '—';
+      const price = tk.mint ? (PRICE_CACHE[tk.mint] || 0) : 0;
+      const usdTk = price > 0 && amtRaw ? ' <span style="font-family:\'Share Tech Mono\',monospace;font-size:10px;color:#4a4a6a">≈ $' + (price * amtRaw).toLocaleString(undefined,{maximumFractionDigits:2}) + '</span>' : '';
+      const logoHtml = tokenLogoEl(tk.token, 22, tk.logoUrl || null);
+      const tokenCol = isBurn ? '#ff8866' : (tokenColor ? tokenColor(tk.token) : '#c0bce0');
+      html += `<div style="display:flex;align-items:center;gap:10px;padding:5px 0 5px 0">
+        <div style="width:22px;height:22px;flex-shrink:0">${logoHtml}</div>
+        <div style="font-family:'Share Tech Mono',monospace;font-size:12px;color:#e0dcf8"><span style="color:#f0f0f8;font-weight:600">${amtStr}</span> <span style="color:${tokenCol}">${tk.token}</span>${usdTk}</div>
+        ${tk.status === 'pending' ? '<span style="font-family:\'Share Tech Mono\',monospace;font-size:9px;color:#5a5a7a;margin-left:auto">PENDING</span>' : ''}
       </div>`;
     }
 
@@ -4686,6 +4659,17 @@ function renderExecutionDetail() {
   }
 
   body.innerHTML = html;
+
+  // Update total USD
+  const totalUsdEl = document.getElementById('dbExecTotalValue');
+  if (totalUsdEl) {
+    let totalUsd = 0;
+    for (const l of lines) {
+      const price = l.mint ? (PRICE_CACHE[l.mint] || 0) : 0;
+      if (price > 0 && l.amount) totalUsd += price * l.amount;
+    }
+    totalUsdEl.textContent = totalUsd > 0.01 ? '≈ $' + totalUsd.toLocaleString(undefined,{maximumFractionDigits:2}) : '';
+  }
 }
 
 
