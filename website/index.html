@@ -4856,19 +4856,15 @@ async function renderActivityLog() {
 
   // ── Helper: get token logo html for a mint (16px inline) ──
   function mintLogoInline(mint) {
-    const _SOL_FULL = 'So11111111111111111111111111111111111111112';
-    const isSOL = !mint || mint === 'native' || mint === _SOL_FULL;
-    // Resolve symbol and logoUrl — exactly like legacy distribution does
-    const sym = isSOL ? 'SOL'
-      : (MINT_TO_SYMBOL[mint]
-        || [...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(t=>t.mint===mint)?.symbol
-        || '');
-    const logoUrl = isSOL ? TOKEN_LOGO_URLS['SOL']
-      : ([...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(t=>t.mint===mint)?.logoUrl || null);
-    // Call tokenLogoEl exactly the same way legacy distribution does: tokenLogoEl(sym, size, logoUrl)
-    return '<span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;vertical-align:middle;margin-right:5px;flex-shrink:0;border-radius:50%;overflow:hidden">'
-      + tokenLogoEl(sym, 16, logoUrl)
-      + '</span>';
+    // Resolve sym + logoUrl exactly the same way execution detail (legacy distribution) does
+    // for its token rows: const _tkSym = tk.token; const logoHtml = tokenLogoEl(_tkSym, size, tk.logoUrl)
+    const _SOL_MINTS = ['native','So11111111111111111111111111111111111111112',''];
+    const sym = _SOL_MINTS.indexOf(mint||'') >= 0 ? 'SOL'
+      : (MINT_TO_SYMBOL[mint] || (([...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(function(t){return t.mint===mint;})||{}).symbol) || '');
+    const logoUrl = _SOL_MINTS.indexOf(mint||'') >= 0 ? null
+      : ((([...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(function(t){return t.mint===mint;})||{}).logoUrl) || null);
+    // tokenLogoEl with sym='SOL' hits TOKEN_LOGO_URLS['SOL'] automatically — same as legacy
+    return tokenLogoEl(sym, 16, logoUrl);
   }
 
   log.innerHTML = ghostState.activityLog.map(entry => {
@@ -4909,8 +4905,9 @@ async function renderActivityLog() {
 
     // Strip leading emoji from msg if we have an iconHtml (avoid double icon)
     if (iconHtml) { msg = msg.replace(/^(\ud83e\ude99|\ud83d\udd25|\ud83d\udc80|\u23f0|\ud83d\udc7b|\ud83d\udc93|\ud83d\udd11|\ud83d\udccb|\u2764|\u26a0|\u2705|\u274c|\u2600|\u2b50|\u{1F493}|[\u{1F300}-\u{1FFFF}\u{2600}-\u{27BF}])\ufe0f?\s*/u, ''); }
-    const tdStyle = iconHtml ? ' style="display:flex;align-items:center"' : '';
-    return '<tr><td' + tdStyle + '>' + iconHtml + msg + '</td><td style="white-space:nowrap;color:#9090b8">' + timeStr + '</td><td style="white-space:nowrap"><span class="addr-short">' + short + '</span>' + cpBtn + '</td></tr>';
+    const tdStyle = iconHtml ? ' style="display:flex;align-items:center;gap:6px"' : '';
+    const iconWrap = iconHtml ? '<span style="flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px">' + iconHtml + '</span>' : '';
+    return '<tr><td' + tdStyle + '>' + iconWrap + msg + '</td><td style="white-space:nowrap;color:#9090b8">' + timeStr + '</td><td style="white-space:nowrap"><span class="addr-short">' + short + '</span>' + cpBtn + '</td></tr>';
   }).join('');
 }
 
