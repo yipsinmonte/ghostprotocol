@@ -866,7 +866,7 @@
 
           <!-- Stake locked — compact -->
           <div id="dbExecStakeRow" style="display:none;border:1px solid rgba(102,51,255,0.15);background:rgba(102,51,255,0.05);padding:13px 18px;display:flex;align-items:center;gap:12px;margin-bottom:4px">
-            <div style="font-size:18px;opacity:0.7">💎</div>
+            <div style="width:22px;height:22px;flex-shrink:0;overflow:hidden" id="dbExecStakeLogo"></div>
             <div style="flex:1;min-width:0">
               <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#b090ff"><strong id="dbExecutedStake">—</strong> $GHOST staked · locked on-chain</div>
               <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#4a4a6a;margin-top:2px">Reclaim via Abandon Ghost — 50% burn penalty applies</div>
@@ -3074,6 +3074,7 @@ async function fetchOnChainHistory() {
       // Detect whole-vault txs and stash per-token data — re-scan disc independently
       // (matchHex/inner are scoped inside labelFromTx, not available here)
       let _entryTokens = null;
+      let _entryMint = null;
       try {
         const _WV_DISCS = new Set(['345d3184612eda0d','59da97947864b51c']);
         const _wsolM = 'So11111111111111111111111111111111111111112';
@@ -3099,9 +3100,18 @@ async function fetchOnChainHistory() {
             }
           }
           if (_tkList.length > 0) _entryTokens = _tkList;
+        } else {
+          // Single-token tx — grab mint from first inner SPL transfer
+          for (const _ix2 of _innerIx2) {
+            const _p2 = _ix2.parsed;
+            if (_p2 && (_p2.type === 'transfer' || _p2.type === 'transferChecked')) {
+              const _m2 = _p2.info?.mint || '';
+              if (_m2) { _entryMint = _m2; break; }
+            }
+          }
         }
       } catch(_e) {}
-            builtActivity.push({msg:label, tx:s.signature, ts, icon:rowIcon, _tokens: _entryTokens});
+            builtActivity.push({msg:label, tx:s.signature, ts, icon:rowIcon, _tokens: _entryTokens, _mint: _entryMint});
       // Always record a ping entry if the tx contains a ping instruction,
       // whether it's a standalone ping or bundled with a settings update
       if (label === '\u{1F493} Heartbeat sent' || hasBundledPing) rawPings.push({ts, sig:s.signature});
@@ -4593,11 +4603,18 @@ async function renderExecutionDetail() {
     if (latest > 0) timeEl.textContent = new Date(latest).toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'long', year:'numeric'});
   }
 
-  // ── Stake ──
+  // ── Stake row with $GHOST logo ──
   if (stakeRow && stakeEl) {
     const stake = g.stakedGhost || 0;
     stakeRow.style.display = stake > 0 ? 'flex' : 'none';
-    if (stake > 0) stakeEl.textContent = stake.toLocaleString();
+    if (stake > 0) {
+      stakeEl.textContent = stake.toLocaleString();
+      const stakeLogoEl = document.getElementById('dbExecStakeLogo');
+      if (stakeLogoEl) {
+        const ghostToken = [...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(t=>t.mint===GHOST_MINT);
+        stakeLogoEl.innerHTML = tokenLogoEl('$GHOST', 22, ghostToken?.logoUrl || null);
+      }
+    }
   }
 
   // ── Build raw token list from activity log _tokens ──
@@ -4663,7 +4680,14 @@ async function renderExecutionDetail() {
     const shortR = wholeRecipient.slice(0,4)+'...'+wholeRecipient.slice(-4);
     const action = wholeAction === 1 ? 'burn' : 'transfer';
     if (Object.keys(mintMap).length > 0) {
-      for (const [mint, t] of Object.entries(mintMap)) {
+      // SOL always first
+      const _SOL_MINT = 'So11111111111111111111111111111111111111112';
+      const mintEntries = Object.entries(mintMap).sort(([a],[b]) => {
+        if (a === _SOL_MINT || a === 'native') return -1;
+        if (b === _SOL_MINT || b === 'native') return 1;
+        return 0;
+      });
+      for (const [mint, t] of mintEntries) {
         lines.push({ action, token: t.symbol || mint.slice(0,4)+'…'+mint.slice(-4), amount: t.amount, recipient: shortR, recipientFull: wholeRecipient, logoUrl: t.logoUrl, status: 'complete', mint });
       }
     } else {
@@ -4753,38 +4777,101 @@ async function renderExecutionDetail() {
 }
 
 
-function renderActivityLog() {
+async function renderActivityLog() {
   const log = document.getElementById('dbActivityLog');
   if (!log) return;
   if (ghostState.activityLog.length === 0) {
     log.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#c0bce0">No activity yet</td></tr>';
     return;
   }
+
+  // ── Collect mints that need metadata (symbol or logo missing) ──
+  const _SOL_MINT = 'So11111111111111111111111111111111111111112';
+  const mintsToFetch = [];
+  for (const entry of ghostState.activityLog) {
+    const mints = [];
+    if (entry._mint) mints.push(entry._mint);
+    if (entry._tokens) entry._tokens.forEach(t => t.mint && mints.push(t.mint));
+    for (const mint of mints) {
+      if (mint === _SOL_MINT || mint === 'native') continue;
+      const cached = MINT_TO_SYMBOL[mint];
+      const knownToken = [...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(t=>t.mint===mint);
+      if (!cached || cached.includes('…') || !knownToken?.logoUrl) {
+        if (!mintsToFetch.includes(mint)) mintsToFetch.push(mint);
+      }
+    }
+  }
+
+  // Fetch metadata for unknown mints
+  if (mintsToFetch.length > 0) {
+    const synth = mintsToFetch.map(mint => {
+      const existing = [...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(t=>t.mint===mint);
+      return { mint, symbol: existing?.symbol || MINT_TO_SYMBOL[mint] || mint.slice(0,4)+'…'+mint.slice(-4), logoUrl: existing?.logoUrl || null, name: existing?.name || '' };
+    });
+    try {
+      await fetchTokenMetadata(synth, mintsToFetch);
+      // Cache results
+      for (const st of synth) {
+        if (st.symbol && !st.symbol.includes('…')) MINT_TO_SYMBOL[st.mint] = st.symbol;
+        // Inject into vaultTokens/walletTokens for tokenLogoEl to pick up via logoUrl arg
+        if (st.logoUrl) {
+          const existing = [...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(t=>t.mint===st.mint);
+          if (existing) { existing.logoUrl = st.logoUrl; existing.symbol = st.symbol; }
+          else ghostState.walletTokens = [...(ghostState.walletTokens||[]), { mint: st.mint, symbol: st.symbol, logoUrl: st.logoUrl, balance: 0 }];
+        }
+      }
+    } catch(e) {}
+  }
+
+  // ── SVG icons ──
   const _depositSvg = '<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;vertical-align:middle;margin-right:5px;flex-shrink:0"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="11" fill="rgba(51,255,120,0.12)" stroke="#33ff78" stroke-width="1.2"/><path d="M12 7v10M7 14l5 4 5-4" stroke="#33ff78" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
   const _withdrawSvg = '<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;vertical-align:middle;margin-right:5px;flex-shrink:0"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="11" fill="rgba(255,80,80,0.12)" stroke="#ff5050" stroke-width="1.2"/><path d="M12 17V7M7 10l5-4 5 4" stroke="#ff5050" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
   const _angelSvg = '<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;vertical-align:middle;margin-right:5px;flex-shrink:0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 0 4px rgba(200,180,255,0.95)) drop-shadow(0 0 8px rgba(160,120,255,0.6))"><ellipse cx="12" cy="4" rx="5" ry="1.5" fill="none" stroke="#e8dcff" stroke-width="1.2"/><circle cx="12" cy="8.5" r="3.2" fill="#cdbfff"/><path d="M4.5 11.5 Q1.5 9 2.5 6 Q4 3.5 7 5 Q9 6.2 8.5 9.5" fill="#ddd0ff" opacity="0.8"/><path d="M19.5 11.5 Q22.5 9 21.5 6 Q20 3.5 17 5 Q15 6.2 15.5 9.5" fill="#ddd0ff" opacity="0.8"/><path d="M7.5 13.5 Q4 16 5 19.5 Q6.5 22 9.5 20 Q11 19 12 17" fill="#c8b8ff" opacity="0.75"/><path d="M16.5 13.5 Q20 16 19 19.5 Q17.5 22 14.5 20 Q13 19 12 17" fill="#c8b8ff" opacity="0.75"/><ellipse cx="12" cy="14.5" rx="2.8" ry="4" fill="#b8a4ff" opacity="0.85"/></svg></span>';
   const _chestSvg = '<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;vertical-align:middle;margin-right:5px;flex-shrink:0"><svg width="18" height="18" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 0 4px rgba(255,200,60,0.7)) drop-shadow(0 0 8px rgba(255,160,0,0.4))"><rect x="3" y="16" width="30" height="17" rx="2" fill="#7c4d00" stroke="#f0a020" stroke-width="1.2"/><rect x="3" y="16" width="30" height="8" rx="2" fill="#a06000" stroke="#f0a020" stroke-width="1.2"/><rect x="2" y="8" width="32" height="11" rx="3" fill="#c07800" stroke="#f0b030" stroke-width="1.2"/><rect x="13" y="19" width="10" height="7" rx="1.5" fill="#f0a020" stroke="#ffd060" stroke-width="0.8"/><circle cx="18" cy="22.5" r="2" fill="#ffd060" stroke="#fff8d0" stroke-width="0.5"/></svg></span>';
+
+  // ── Helper: get token logo html for a mint (16px inline) ──
+  function mintLogoInline(mint) {
+    if (!mint || mint === 'native') mint = _SOL_MINT;
+    const known = [...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(t=>t.mint===mint);
+    const sym = known?.symbol || MINT_TO_SYMBOL[mint] || '';
+    const logo = known?.logoUrl || null;
+    return '<span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;vertical-align:middle;margin-right:5px;flex-shrink:0;border-radius:50%;overflow:hidden">'
+      + tokenLogoEl(sym, 16, logo)
+      + '</span>';
+  }
+
   log.innerHTML = ghostState.activityLog.map(entry => {
     const d = new Date(entry.ts);
     const timeStr = d.toLocaleDateString('en-GB', {day:'numeric',month:'short'}) + ' ' + d.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
     const fullSig = entry.tx||'';
     const short = fullSig.length>12 ? fullSig.slice(0,4)+'...'+fullSig.slice(-4) : fullSig;
     const cpBtn = fullSig ? '<button onclick="copyAddr(\'' + fullSig + '\')" title="Copy tx signature" style="background:none;border:1px solid rgba(102,51,255,0.25);color:#8888bb;font-size:10px;padding:1px 5px;cursor:pointer;margin-left:4px;font-family:\'Share Tech Mono\',monospace;vertical-align:middle;line-height:1.4">\u29C9</button>' : '';
+
     let iconHtml = '';
     if (entry.icon === 'angel') iconHtml = _angelSvg;
     else if (entry.icon === 'deposit') iconHtml = _depositSvg;
     else if (entry.icon === 'withdraw') iconHtml = _withdrawSvg;
-    else if (entry.msg && /whole vault|Whole vault|whole-vault|Whole Vault/i.test(entry.msg)) iconHtml = _chestSvg;
-    // Auto-detect for chain history rows (no icon field stored)
-    if (!iconHtml) {
-      if (/Vault Deposit/i.test(entry.msg)) iconHtml = _depositSvg;
-      else if (/Vault Withdrawal/i.test(entry.msg)) iconHtml = _withdrawSvg;
+    else if (entry.msg && /whole vault|Whole vault|whole-vault/i.test(entry.msg)) iconHtml = _chestSvg;
+    else if (/Vault Deposit/i.test(entry.msg)) iconHtml = _depositSvg;
+    else if (/Vault Withdrawal/i.test(entry.msg)) iconHtml = _withdrawSvg;
+    // Token transfer/burn rows — show token logo from _mint
+    else if (entry._mint) iconHtml = mintLogoInline(entry._mint);
+
+    // Enrich msg: replace truncated mint addresses with resolved symbols
+    let msg = entry.msg || '';
+    if (entry._mint && MINT_TO_SYMBOL[entry._mint] && MINT_TO_SYMBOL[entry._mint] !== entry._mint) {
+      const shortMint = entry._mint.slice(0,4) + '\u2026' + entry._mint.slice(-4);
+      if (msg.includes(shortMint)) msg = msg.replace(shortMint, MINT_TO_SYMBOL[entry._mint]);
+      // Also replace longer truncations like "J5mW...pump"
+      const altShort = entry._mint.slice(0,4) + '...' + entry._mint.slice(-4);
+      if (msg.includes(altShort)) msg = msg.replace(altShort, MINT_TO_SYMBOL[entry._mint]);
     }
-    const rowBg = '';
+
     const tdStyle = iconHtml ? ' style="display:flex;align-items:center"' : '';
-    return '<tr' + rowBg + '><td' + tdStyle + '>' + iconHtml + entry.msg + '</td><td style="white-space:nowrap;color:#9090b8">' + timeStr + '</td><td style="white-space:nowrap"><span class="addr-short">' + short + '</span>' + cpBtn + '</td></tr>';
+    return '<tr><td' + tdStyle + '>' + iconHtml + msg + '</td><td style="white-space:nowrap;color:#9090b8">' + timeStr + '</td><td style="white-space:nowrap"><span class="addr-short">' + short + '</span>' + cpBtn + '</td></tr>';
   }).join('');
 }
+
 
 function randomTx() {
   const c = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
