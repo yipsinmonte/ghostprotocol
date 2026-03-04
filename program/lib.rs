@@ -527,7 +527,10 @@ pub mod ghost_protocol {
 
     pub fn abandon_ghost(ctx: Context<AbandonGhost>) -> Result<()> {
         let owner = ctx.accounts.ghost.owner;
-        let staked = ctx.accounts.ghost.staked_ghost;
+        // Use actual vault balance rather than ghost.staked_ghost — bounty payments
+        // may have reduced the vault below the original staked amount, causing
+        // InsufficientFunds if we try to burn/return the full recorded stake.
+        let staked = ctx.accounts.ghost_stake_vault.amount;
         let bump = ctx.accounts.ghost.bump;
         let burn_amount = staked.checked_mul(BURN_ON_ABANDON_BPS).unwrap().checked_div(10_000).unwrap();
         let return_amount = staked.checked_sub(burn_amount).unwrap();
