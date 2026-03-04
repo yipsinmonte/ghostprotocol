@@ -4888,7 +4888,7 @@ async function renderActivityLog() {
     // Token transfer/burn rows — show token logo from _mint
     else if (entry._mint) iconHtml = mintLogoInline(entry._mint);
     // SOL fallback: if msg mentions SOL/wSOL but _mint wasn't set, force SOL logo
-    else if (/\b(SOL|wSOL)\b/.test(entry.msg)) { console.log('[Ghost] SOL fallback icon for:', entry.msg, '_mint:', entry._mint); iconHtml = mintLogoInline('native'); }
+    else if (/\b(SOL|wSOL)\b/.test(entry.msg)) iconHtml = mintLogoInline('native');
 
     // Enrich msg: replace any truncated mint in msg with resolved symbol
     let msg = entry.msg || '';
@@ -9017,19 +9017,21 @@ async function dbAbandonOnChain() {
     }
     const ghostTokenProgramId = mintOwner ? new PublicKey(new Uint8Array(b58dec(mintOwner))) : TOKEN_PROGRAM_ID;
 
-    // AbandonGhost accounts (matches AbandonGhost context in lib.rs):
-    // ghost (mut, close=signer), signer (mut), ghost_mint, ghost_stake_vault (mut), owner_token_account (mut), token_program
+    // AbandonGhost accounts — same order as InitializeGhost (lib.rs):
+    // ghost, vault, ghost_mint, ghost_stake_vault, owner_token_account, signer, token_program, system_program
     const data = new Uint8Array(8);
     data.set(disc, 0);
     const ix = new TransactionInstruction({
       programId,
       keys: [
-        { pubkey: ghostPda,              isSigner: false, isWritable: true  },
-        { pubkey: walletPubkey,          isSigner: true,  isWritable: true  },
-        { pubkey: ghostMint,             isSigner: false, isWritable: false },
-        { pubkey: ghostStakeVault,       isSigner: false, isWritable: true  },
-        { pubkey: ownerTokenAccount,     isSigner: false, isWritable: true  },
-        { pubkey: ghostTokenProgramId,   isSigner: false, isWritable: false },
+        { pubkey: ghostPda,                            isSigner: false, isWritable: true  },
+        { pubkey: vaultPda,                            isSigner: false, isWritable: false },
+        { pubkey: ghostMint,                           isSigner: false, isWritable: false },
+        { pubkey: ghostStakeVault,                     isSigner: false, isWritable: true  },
+        { pubkey: ownerTokenAccount,                   isSigner: false, isWritable: true  },
+        { pubkey: walletPubkey,                        isSigner: true,  isWritable: true  },
+        { pubkey: ghostTokenProgramId,                 isSigner: false, isWritable: false },
+        { pubkey: solanaWeb3.SystemProgram.programId,  isSigner: false, isWritable: false },
       ],
       data
     });
