@@ -8992,24 +8992,10 @@ async function dbAbandonOnChain() {
       programId
     );
 
-    // Verify stake vault has sufficient balance — bounty payment may have reduced it below staked_ghost
+    // Log stake vault balance for debugging (contract now uses vault.amount directly)
     try {
       const svInfo = await connection.getTokenAccountBalance(ghostStakeVault);
-      const svRaw = BigInt(svInfo.value.amount || '0');
-      const stakedRaw = BigInt(Math.round((ghostState.ghost.stakedGhost || 0) * 1_000_000));
-      console.log('[Ghost] Stake vault balance:', svRaw.toString(), 'staked_ghost:', stakedRaw.toString());
-      if (svRaw < stakedRaw) {
-        // Contract will try to burn staked_ghost but vault only has svRaw — will fail
-        // Surface a clear error rather than a cryptic on-chain failure
-        const svUi = Number(svRaw) / 1_000_000;
-        const stUi = Number(stakedRaw) / 1_000_000;
-        showNotif(
-          'Stake vault has ' + svUi.toLocaleString() + ' $GHOST but contract expects ' + stUi.toLocaleString() +
-          '. This can happen after an executor bounty was paid. The abandon_ghost instruction cannot complete — the contract does not support partial-stake abandonment.',
-          'error'
-        );
-        return;
-      }
+      console.log('[Ghost] Stake vault balance raw:', svInfo.value.amount);
     } catch(e) { console.warn('[Ghost] Could not check stake vault balance:', e); }
 
     // Find owner's $GHOST ATA for the return transfer
