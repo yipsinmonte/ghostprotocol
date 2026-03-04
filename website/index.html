@@ -869,7 +869,7 @@
             <div style="width:22px;height:22px;flex-shrink:0;overflow:hidden" id="dbExecStakeLogo"></div>
             <div style="flex:1;min-width:0">
               <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#b090ff"><strong id="dbExecutedStake">—</strong> $GHOST staked · locked on-chain</div>
-              <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#4a4a6a;margin-top:2px">Reclaim via Abandon Ghost — 50% burn penalty applies</div>
+              <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#4a4a6a;margin-top:2px">5% paid as executor bounty · Reclaim remaining — 50% burn penalty applies</div>
             </div>
             <button onclick="dbAbandonOnChain()" style="background:transparent;border:1px solid rgba(102,51,255,0.35);color:#a080ff;font-family:'Share Tech Mono',monospace;font-size:10px;padding:5px 12px;cursor:pointer;letter-spacing:0.1em;white-space:nowrap;flex-shrink:0">RECLAIM →</button>
           </div>
@@ -1226,9 +1226,9 @@
         </div>
 
         <div class="db-form" style="border-color:rgba(255,61,90,0.2)">
-          <div class="db-form-title" style="color:var(--red)">⚠️ Danger Zone</div>
-          <div class="db-info" style="border-color:var(--red)"><strong>Abandon Ghost:</strong> Permanently closes your vault. Burns 50% of your staked $GHOST. Cannot be undone.</div>
-          <button class="db-btn db-btn-danger" onclick="dbAbandonOnChain()">💀 Abandon Ghost</button>
+          <div class="db-form-title" style="color:var(--red)" id="dangerZoneTitle">⚠️ Danger Zone</div>
+          <div class="db-info" style="border-color:var(--red)" id="dangerZoneDesc"><strong>Abandon Ghost:</strong> Permanently closes your vault. Burns 50% of your staked $GHOST. Cannot be undone.</div>
+          <button class="db-btn db-btn-danger" id="dangerZoneBtn" onclick="dbAbandonOnChain()">💀 Abandon Ghost</button>
         </div>
       </div>
 
@@ -1513,7 +1513,7 @@
 <!-- STATS -->
 <div class="stats-wrap reveal">
   <div class="stats">
-    <div class="stat"><a href="https://solscan.io/account/3Es13GXc4qwttE6uSgAAfi1zvBD3qzLkZpY21KfT3sZ3#anchorAccounts" target="_blank" style="text-decoration:none;color:inherit;display:contents"><span class="stat-value" id="ghostCount">2,401</span><span class="stat-label">Ghosts Active ↗</span></a></div>
+    <div class="stat"><a href="https://solscan.io/account/3Es13GXc4qwttE6uSgAAfi1zvBD3qzLkZpY21KfT3sZ3#anchorAccounts" target="_blank" style="text-decoration:none;color:inherit;display:contents"><span class="stat-value" id="ghostCount">—</span><span class="stat-label">Ghosts Active ↗</span></a></div>
     <div class="stat"><span class="stat-value" id="avgHeartbeat">—</span><span class="stat-label">Avg Heartbeat</span></div>
     <div class="stat"><span class="stat-value">∞</span><span class="stat-label">Legacy Duration</span></div>
   </div>
@@ -1730,11 +1730,9 @@ async function fetchGhostCount() {
       if (!seen.has(a.pubkey)) { seen.add(a.pubkey); accounts.push(a); }
     }
     const count = accounts.length;
-    if (count > 0) {
-      const el = document.getElementById('ghostCount');
-      if (el) el.textContent = count.toLocaleString();
-      console.log('[Ghost] On-chain ghost count:', count);
-    }
+    const el = document.getElementById('ghostCount');
+    if (el) el.textContent = count.toLocaleString();
+    console.log('[Ghost] On-chain ghost count:', count);
 
     // ── Parse interval from sliced data ──────────────────────────
     let totalDays = 0, validCount = 0;
@@ -2027,36 +2025,68 @@ async function fetchAllPrices() {
 }
 
 async function fetchGhostTokenPrice() {
-  try {
-    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${GHOST_MINT}`);
-    const data = await res.json();
-    // Handle both { pairs: [...] } and { pair: {...} }
-    const pairs = data?.pairs || (data?.pair ? [data.pair] : []);
-    const pair = pairs.sort((a,b) => (b.liquidity?.usd||0)-(a.liquidity?.usd||0))[0];
-    console.log('[Ghost] DexScreener GHOST pairs:', pairs.length, 'priceUsd:', pair?.priceUsd, 'mcap:', pair?.marketCap, 'vol:', pair?.volume?.h24, 'change:', pair?.priceChange?.h24);
-    if (!pair) return;
-    const fmt = (n) => n >= 1e6 ? '$' + (n/1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(1) + 'K' : '$' + n.toFixed(2);
-
-    if (pair.priceUsd) {
-      ghostPriceUsd = parseFloat(pair.priceUsd);
-      PRICE_CACHE[GHOST_MINT] = ghostPriceUsd;
+  const fmt = (n) => n >= 1e6 ? '$' + (n/1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(1) + 'K' : '$' + n.toFixed(2);
+  const setTicker = (price, mcap, vol, change) => {
+    if (price > 0) {
+      ghostPriceUsd = price;
+      PRICE_CACHE[GHOST_MINT] = price;
       const priceEl = document.getElementById('price');
-      if (priceEl) priceEl.textContent = ghostPriceUsd < 0.001 ? '$' + ghostPriceUsd.toFixed(8) : '$' + ghostPriceUsd.toFixed(6);
+      if (priceEl) priceEl.textContent = price < 0.001 ? '$' + price.toFixed(8) : '$' + price.toFixed(6);
     }
-    const mcap = pair.marketCap || pair.fdv || 0;
-    const vol = pair.volume?.h24 || 0;
-    const change = pair.priceChange?.h24 ?? null;
-
     const mcapEl = document.getElementById('mcap');
     if (mcapEl) mcapEl.textContent = mcap ? fmt(mcap) : '—';
     const volEl = document.getElementById('vol24');
     if (volEl) volEl.textContent = vol ? fmt(vol) : '—';
     const changeEl = document.getElementById('priceChange');
     if (changeEl) {
-      changeEl.textContent = change !== null ? (change >= 0 ? '+' : '') + change.toFixed(2) + '%' : '—';
-      changeEl.className = 'ticker-value ' + (change >= 0 ? 'up' : 'down');
+      changeEl.textContent = change !== null ? (change >= 0 ? '+' : '') + parseFloat(change).toFixed(2) + '%' : '—';
+      changeEl.className = 'ticker-value ' + (change !== null ? (parseFloat(change) >= 0 ? 'up' : 'down') : '');
+    }
+  };
+
+  // ── 1. DexScreener ───────────────────────────────────────────
+  let dexOk = false;
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${GHOST_MINT}`);
+    const data = await res.json();
+    const pairs = data?.pairs || (data?.pair ? [data.pair] : []);
+    const pair = pairs.sort((a,b) => (b.liquidity?.usd||0)-(a.liquidity?.usd||0))[0];
+    console.log('[Ghost] DexScreener GHOST pairs:', pairs.length, 'priceUsd:', pair?.priceUsd, 'mcap:', pair?.marketCap, 'vol:', pair?.volume?.h24, 'change:', pair?.priceChange?.h24);
+    if (pair?.priceUsd) {
+      setTicker(parseFloat(pair.priceUsd), pair.marketCap || pair.fdv || 0, pair.volume?.h24 || 0, pair.priceChange?.h24 ?? null);
+      dexOk = true;
     }
   } catch(e) { console.log('[Ghost] DexScreener error:', e.message); }
+
+  if (dexOk) return;
+
+  // ── 2. Jupiter v3 fallback (price only — no mcap/vol/change) ─
+  try {
+    const r = await fetch(`https://api.jup.ag/price/v3?ids=${GHOST_MINT}`, {
+      headers: { 'x-api-key': '8bef3e9f-8dca-495b-8b42-6df346fda48e' }
+    });
+    if (r.ok) {
+      const data = await r.json();
+      const info = data?.[GHOST_MINT];
+      const price = info?.usdPrice ? parseFloat(info.usdPrice) : 0;
+      console.log('[Ghost] Jupiter fallback GHOST price:', price);
+      if (price > 0) {
+        setTicker(price, 0, 0, null);
+        return;
+      }
+    }
+  } catch(e) { console.log('[Ghost] Jupiter fallback error:', e.message); }
+
+  // ── 3. Jupiter v1 fallback ────────────────────────────────────
+  try {
+    const r = await fetch(`https://price.jup.ag/v4/price?ids=${GHOST_MINT}`);
+    if (r.ok) {
+      const data = await r.json();
+      const price = data?.data?.[GHOST_MINT]?.price || 0;
+      console.log('[Ghost] Jupiter v1 fallback GHOST price:', price);
+      if (price > 0) setTicker(price, 0, 0, null);
+    }
+  } catch(e) { console.log('[Ghost] Jupiter v1 fallback error:', e.message); }
 }
 
 function updateMarketingTicker() {
@@ -2137,38 +2167,8 @@ setInterval(fetchAllPrices, 30000);
 // ─── DexScreener for $GHOST marketing ticker ─────────────────────
 
 async function fetchTokenPrice() {
-  // Legacy wrapper — now handled by fetchAllPrices
+  // Delegates to fetchGhostTokenPrice which has DexScreener + Jupiter fallback chain
   await fetchGhostTokenPrice();
-  try {
-    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${GHOST_MINT}`);
-    const data = await res.json();
-    // DexScreener returns either { pairs: [...] } or { pair: {...} } depending on endpoint
-    const pairs = data?.pairs || (data?.pair ? [data.pair] : []);
-    const pair = pairs.sort((a,b) => (b.liquidity?.usd||0)-(a.liquidity?.usd||0))[0];
-    const fmt = (n) => n >= 1e6 ? '$' + (n/1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(1) + 'K' : '$' + n.toFixed(2);
-    console.log('[Ghost] DexScreener ticker pairs:', pairs.length, 'pair keys:', pair ? Object.keys(pair) : 'none');
-    if (pair) {
-      const price = parseFloat(pair.priceUsd || 0);
-      const mcap = pair.marketCap || pair.fdv || 0;
-      const change = pair.priceChange?.h24 ?? null;
-      const vol = pair.volume?.h24 || 0;
-      const priceEl = document.getElementById('price');
-      if (priceEl) priceEl.textContent = price < 0.001 ? '$' + price.toFixed(8) : '$' + price.toFixed(6);
-      const mcapEl = document.getElementById('mcap');
-      if (mcapEl) mcapEl.textContent = mcap ? fmt(mcap) : '—';
-      const volEl = document.getElementById('vol24');
-      if (volEl) volEl.textContent = vol ? fmt(vol) : '—';
-      const changeEl = document.getElementById('priceChange');
-      if (changeEl) {
-        changeEl.textContent = change !== null ? (change >= 0 ? '+' : '') + change.toFixed(2) + '%' : '—';
-        changeEl.className = 'ticker-value ' + (change >= 0 ? 'up' : 'down');
-      }
-    } else {
-      ['price','mcap','priceChange','vol24'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = '—'; });
-      const priceEl = document.getElementById('price');
-      if (priceEl) priceEl.textContent = 'Not listed';
-    }
-  } catch(e) { console.log('DexScreener error:', e); }
   renderVaultOverview();
 }
 
@@ -3491,6 +3491,28 @@ function parseGhostAccount(bytes) {
   }
 }
 
+// ── Danger Zone: adapt labels for executed (reclaim) vs alive (abandon) ──
+function syncDangerZone() {
+  const isExecuted = ghostState.ghost?.status === 'executed';
+  const titleEl = document.getElementById('dangerZoneTitle');
+  const descEl  = document.getElementById('dangerZoneDesc');
+  const btnEl   = document.getElementById('dangerZoneBtn');
+  if (!titleEl || !descEl || !btnEl) return;
+  if (isExecuted) {
+    titleEl.innerHTML = '💰 Reclaim Stake';
+    descEl.innerHTML  = '<strong>Reclaim Stake:</strong> Your ghost has been executed. Reclaim your remaining staked $GHOST — 50% burn penalty applies. Vault assets were already distributed.';
+    btnEl.textContent = '💰 Reclaim Stake';
+    btnEl.style.borderColor = 'rgba(160,96,255,0.4)';
+    btnEl.style.color = '#a060ff';
+  } else {
+    titleEl.innerHTML = '⚠️ Danger Zone';
+    descEl.innerHTML  = '<strong>Abandon Ghost:</strong> Permanently closes your vault. Burns 50% of your staked $GHOST. Cannot be undone.';
+    btnEl.textContent = '💀 Abandon Ghost';
+    btnEl.style.borderColor = '';
+    btnEl.style.color = '';
+  }
+}
+
 function updateDashboardUI() {
   const g = ghostState.ghost;
   const isNone = g.status === 'none' || g.status === 'needs-migration';
@@ -3683,6 +3705,7 @@ function updateDashboardUI() {
   updateCountdown();
   syncSettingsDisplay();
   updateWalletIdentity();
+  syncDangerZone();
 }
 
 // ─── Wallet Identity Card ────────────────────────────────────────
@@ -8936,18 +8959,36 @@ async function dbUpdateGrace() {
 // closes the ghost PDA (lamports returned to signer).
 async function dbAbandonOnChain() {
   const staked = ghostState.ghost.stakedGhost || 0;
-  const burnAmt = Math.floor(staked * 0.5).toLocaleString();
-  const returnAmt = Math.ceil(staked * 0.5).toLocaleString();
-
   const _isExecuted = ghostState.ghost.status === 'executed';
-  const _vaultNote = _isExecuted
-    ? 'Vault assets have already been distributed by the protocol.'
-    : 'Vault assets remain in vault — withdraw them first if needed.';
+
+  // Fetch actual stake vault balance — may be less than staked due to 5% executor bounty
+  let actualStakeUi = staked;
+  let bountyNote = '';
+  try {
+    const { PublicKey: _PK } = solanaWeb3;
+    const _conn = new solanaWeb3.Connection(RPC_URL, 'confirmed');
+    const [_sv] = await _PK.findProgramAddress(
+      [new TextEncoder().encode('stake_vault'), new _PK(ghostState.publicKey).toBytes()],
+      new _PK(PROGRAM_ID)
+    );
+    const _svInfo = await _conn.getTokenAccountBalance(_sv);
+    actualStakeUi = Number(_svInfo.value.amount) / 1_000_000;
+    if (actualStakeUi < staked) {
+      const bountyPaid = staked - actualStakeUi;
+      bountyNote = `\n⚠️ Note: ${bountyPaid.toLocaleString(undefined,{maximumFractionDigits:2})} $GHOST was paid as executor bounty — actual stake is ${actualStakeUi.toLocaleString(undefined,{maximumFractionDigits:2})} $GHOST.`;
+    }
+  } catch(e) { /* use staked as fallback */ }
+
+  const burnAmt = Math.floor(actualStakeUi * 0.5).toLocaleString(undefined,{maximumFractionDigits:2});
+  const returnAmt = Math.ceil(actualStakeUi * 0.5).toLocaleString(undefined,{maximumFractionDigits:2});
+
   const _ok = await ghostConfirm({
-    icon: '💀',
-    title: 'Abandon Ghost',
-    message: `This permanently closes your ghost on-chain.\n\nBurns ${burnAmt} $GHOST (50% of stake).\nReturns ${returnAmt} $GHOST to your wallet.\n${_vaultNote}\n\nCANNOT be undone.`,
-    okLabel: 'ABANDON FOREVER', danger: true
+    icon: _isExecuted ? '💰' : '💀',
+    title: _isExecuted ? 'Reclaim Stake' : 'Abandon Ghost',
+    message: _isExecuted
+      ? `Reclaim your remaining staked $GHOST from your executed ghost.${bountyNote}\n\nBurns ${burnAmt} $GHOST (50% penalty).\nReturns ${returnAmt} $GHOST to your wallet.\nVault assets were already distributed by the protocol.\n\nCANNOT be undone.`
+      : `This permanently closes your ghost on-chain.${bountyNote}\n\nBurns ${burnAmt} $GHOST (50% of stake).\nReturns ${returnAmt} $GHOST to your wallet.\nVault assets remain in vault — withdraw them first if needed.\n\nCANNOT be undone.`,
+    okLabel: _isExecuted ? 'RECLAIM STAKE' : 'ABANDON FOREVER', danger: true
   });
   if (!_ok) return;
 
@@ -8962,7 +9003,7 @@ async function dbAbandonOnChain() {
   }
 
   try {
-    showNotif('Abandoning ghost...', '');
+    showNotif(_isExecuted ? 'Reclaiming stake...' : 'Abandoning ghost...', '');
     const { PublicKey, Transaction, TransactionInstruction } = solanaWeb3;
     const walletPubkey = new PublicKey(ghostState.publicKey);
     const ghostPda = new PublicKey(ghostState.ghostPda);
@@ -8971,15 +9012,17 @@ async function dbAbandonOnChain() {
     const ghostMint = new PublicKey(GHOST_MINT);
     const connection = new solanaWeb3.Connection(RPC_URL, 'confirmed');
 
-    // ── Step 1: sweep vault assets back to owner (batched via shared helper) ─
-    const vaultTokens = [...ghostState.vaultTokens];
-    if (vaultTokens.length > 0) {
-      showNotif('Step 1/2: Returning ' + vaultTokens.length + ' vault asset(s) to wallet...', '');
-      const { success, total } = await drainVaultOnChain(vaultTokens, { connection, walletPk: walletPubkey, ghostPda, vaultPda, programId });
-      if (success < total) {
-        showNotif((total - success) + ' asset(s) failed to withdraw. Continuing with abandon...', 'error');
-      } else {
-        showNotif('All vault assets returned. Closing ghost...', 'green');
+    // ── Step 1: sweep vault assets back to owner (skip for executed — already distributed) ─
+    if (!_isExecuted) {
+      const vaultTokens = [...ghostState.vaultTokens];
+      if (vaultTokens.length > 0) {
+        showNotif('Step 1/2: Returning ' + vaultTokens.length + ' vault asset(s) to wallet...', '');
+        const { success, total } = await drainVaultOnChain(vaultTokens, { connection, walletPk: walletPubkey, ghostPda, vaultPda, programId });
+        if (success < total) {
+          showNotif((total - success) + ' asset(s) failed to withdraw. Continuing with abandon...', 'error');
+        } else {
+          showNotif('All vault assets returned. Closing ghost...', 'green');
+        }
       }
     }
 
@@ -9047,10 +9090,13 @@ async function dbAbandonOnChain() {
     const conf = await connection.confirmTransaction(sig, 'confirmed');
     if (conf.value?.err) throw new Error('TX failed: ' + JSON.stringify(conf.value.err));
 
-    addActivityRow('💀 Ghost abandoned on-chain', sig.slice(0,4)+'...'+sig.slice(-4));
+    addActivityRow(
+      _isExecuted ? '💰 Stake reclaimed on-chain' : '💀 Ghost abandoned on-chain',
+      sig.slice(0,4)+'...'+sig.slice(-4)
+    );
 
     // Show abandon animation then aftermath
-    await dbAbandon(true, true); // skip confirm, onChain=true
+    await dbAbandon(true, true, _isExecuted); // skip confirm, onChain=true
   } catch(err) {
     console.error('[Ghost] Abandon error:', err);
     showNotif('Failed: ' + (err.message || err), 'error');
@@ -9060,7 +9106,7 @@ async function dbAbandonOnChain() {
 // ── UI account reset / animation after abandon ───────────────────
 // skipConfirm: skip the confirmation modal (used when on-chain tx already done)
 // onChain: true = real tx was just executed (50% burned); false = UI-only reset
-async function dbAbandon(skipConfirm, onChain) {
+async function dbAbandon(skipConfirm, onChain, wasExecuted) {
   // Step 1: Confirmation modal
   const confirmed = skipConfirm ? true : await new Promise(resolve => {
     const modal = document.createElement('div');
@@ -9154,15 +9200,17 @@ async function dbAbandon(skipConfirm, onChain) {
   document.getElementById('nav-overview')?.classList.add('active');
 
   overviewPage.innerHTML = `
-    <div class="db-page-title">${onChain ? 'Ghost Abandoned' : 'Account Reset'}</div>
+    <div class="db-page-title">${onChain ? (wasExecuted ? 'Stake Reclaimed' : 'Ghost Abandoned') : 'Account Reset'}</div>
     <div class="db-page-sub">${onChain ? 'On-chain execution complete' : 'Ready to re-register'}</div>
     <div style="animation:aftermath-fade-in 0.8s ease-out both">
       <div style="background:rgba(102,51,255,0.04);border:1px solid rgba(102,51,255,0.15);border-radius:10px;padding:32px;margin-bottom:20px;text-align:center">
-        <div style="font-size:56px;margin-bottom:16px;opacity:0.6">👻</div>
-        <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:22px;color:#a060ff;margin-bottom:8px">${onChain ? 'Ghost permanently closed' : 'Ghost account cleared'}</div>
+        <div style="font-size:56px;margin-bottom:16px;opacity:0.6">${onChain ? (wasExecuted ? '💰' : '👻') : '👻'}</div>
+        <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:22px;color:#a060ff;margin-bottom:8px">${onChain ? (wasExecuted ? 'Stake successfully reclaimed' : 'Ghost permanently closed') : 'Ghost account cleared'}</div>
         <div style="font-family:'Share Tech Mono',monospace;font-size:13px;color:#7060a0;line-height:1.7">
-          ${onChain 
-            ? '50% of your staked $GHOST was burned.<br>50% was returned to your wallet.<br>Your vault assets remain — withdraw them via direct SPL transfer.'
+          ${onChain
+            ? (wasExecuted
+                ? '50% of your remaining stake was burned.<br>50% was returned to your wallet.<br>Vault assets were already distributed by the protocol.'
+                : '50% of your staked $GHOST was burned.<br>50% was returned to your wallet.<br>Your vault assets remain — withdraw them via direct SPL transfer.')
             : 'Your local account state has been reset.<br>Your vault assets are untouched on-chain.<br>Register a new ghost account to continue.'
           }
         </div>
