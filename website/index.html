@@ -3071,26 +3071,37 @@ async function fetchOnChainHistory() {
         }
       } catch(_) {}
       // For whole-vault txs, stash per-token breakdown on the entry so renderExecutionDetail can use it
+      // Detect whole-vault txs and stash per-token data — re-scan disc independently
+      // (matchHex/inner are scoped inside labelFromTx, not available here)
       let _entryTokens = null;
-      if (matchHex === '345d3184612eda0d' || matchHex === '59da97947864b51c') {
+      try {
+        const _WV_DISCS = new Set(['345d3184612eda0d','59da97947864b51c']);
         const _wsolM = 'So11111111111111111111111111111111111111112';
-        const _tkList = [];
-        for (const _ix of inner) {
-          const _p = _ix.parsed;
-          if (_p && (_p.type === 'transfer' || _p.type === 'transferChecked')) {
-            const _info = _p.info || {};
-            const _amt = _info.tokenAmount?.uiAmountString || _info.amount;
-            const _mint = _info.mint || '';
-            if (_amt && _mint) {
-              const _sym = resolveMintSymbol(_mint) || (_mint === _wsolM ? 'wSOL' : _mint.slice(0,4)+'…'+_mint.slice(-4));
-              const _found = [...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(t=>t.mint===_mint);
-              _tkList.push({ symbol: _sym, mint: _mint, amount: parseFloat(_amt), logoUrl: _found?.logoUrl || null });
+        const _topIx2 = tx?.transaction?.message?.instructions || [];
+        const _innerIx2 = (tx?.meta?.innerInstructions || []).flatMap(g => g.instructions || []);
+        const _isWV = [..._topIx2, ..._innerIx2].some(ix => {
+          if (ix.programId !== PROGRAM_ID || !ix.data) return false;
+          try { return _WV_DISCS.has(b58ToDiscHex(ix.data)); } catch(_e){return false;}
+        });
+        if (_isWV) {
+          const _tkList = [];
+          for (const _ix of _innerIx2) {
+            const _p = _ix.parsed;
+            if (_p && (_p.type === 'transfer' || _p.type === 'transferChecked')) {
+              const _info = _p.info || {};
+              const _amt = _info.tokenAmount?.uiAmountString || _info.amount;
+              const _mint = _info.mint || '';
+              if (_amt && _mint) {
+                const _sym = resolveMintSymbol(_mint) || (_mint === _wsolM ? 'wSOL' : _mint.slice(0,4)+'…'+_mint.slice(-4));
+                const _found = [...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])].find(t=>t.mint===_mint);
+                _tkList.push({ symbol: _sym, mint: _mint, amount: parseFloat(_amt), logoUrl: _found?.logoUrl || null });
+              }
             }
           }
+          if (_tkList.length > 0) _entryTokens = _tkList;
         }
-        if (_tkList.length > 0) _entryTokens = _tkList;
-      }
-      builtActivity.push({msg:label, tx:s.signature, ts, icon:rowIcon, _tokens: _entryTokens});
+      } catch(_e) {}
+            builtActivity.push({msg:label, tx:s.signature, ts, icon:rowIcon, _tokens: _entryTokens});
       // Always record a ping entry if the tx contains a ping instruction,
       // whether it's a standalone ping or bundled with a settings update
       if (label === '\u{1F493} Heartbeat sent' || hasBundledPing) rawPings.push({ts, sig:s.signature});
@@ -4601,8 +4612,7 @@ function renderExecutionDetail() {
     const action = wholeAction === 1 ? 'burn' : 'transfer';
 
     // Priority 1: tokens stored on activity log entries (from inner SPL transfers at tx time)
-    const wvEntries = log.filter(e => e._tokens && e._tokens.length > 0 &&
-      e.msg && (e.msg.includes('vault transfer') || e.msg.includes('vault burn') || e.msg.includes('Whole vault')));
+    const wvEntries = log.filter(e => e._tokens && e._tokens.length > 0);
     // Dedupe by mint across all whole-vault tx entries
     const wvMintSeen = new Set();
     const wvTokens = [];
@@ -4700,15 +4710,14 @@ function renderExecutionDetail() {
         : '—';
       const price = tk.mint ? (PRICE_CACHE[tk.mint] || 0) : 0;
       const usdTk = price > 0 && amtRaw ? ' <span style="font-family:\'Share Tech Mono\',monospace;font-size:10px;color:#4a4a6a">≈ $' + (price * amtRaw).toLocaleString(undefined,{maximumFractionDigits:2}) + '</span>' : '';
-      const logoHtml = tokenLogoEl(tk.token, 22, tk.logoUrl || null);
-      const tokenCol = isBurn ? '#ff8866' : (tokenColor ? tokenColor(tk.token) : '#c0bce0');
-      html += `<div style="display:flex;align-items:center;gap:10px;padding:5px 0 5px 0">
+      const _tkSym = tk.token === 'All tokens' ? 'Whole Vault' : tk.token;
+      const logoHtml = tokenLogoEl(_tkSym, 22, tk.logoUrl || null);
+      const tokenCol = isBurn ? '#ff8866' : (typeof tokenColor === 'function' ? tokenColor(tk.token) : '#c0bce0');
+      html += `<div style="display:flex;align-items:center;gap:10px;padding:5px 0">
         <div style="width:22px;height:22px;flex-shrink:0">${logoHtml}</div>
         <div style="font-family:'Share Tech Mono',monospace;font-size:12px;color:#e0dcf8"><span style="color:#f0f0f8;font-weight:600">${amtStr}</span> <span style="color:${tokenCol}">${tk.token}</span>${usdTk}</div>
-        ${tk.status === 'pending' ? '<span style="font-family:\'Share Tech Mono\',monospace;font-size:9px;color:#5a5a7a;margin-left:auto">PENDING</span>' : ''}
+        ${tk.status === 'pending' ? `<span style="font-family:'Share Tech Mono',monospace;font-size:9px;color:#5a5a7a;margin-left:auto">PENDING</span>` : ''}
       </div>`;
-    }
-
     html += `</div>`;
   }
 
