@@ -4039,40 +4039,50 @@ function validateStakeInput(el) {
 
 // ─── Initialize Ghost ────────────────────────────────────────────
 
-// Check on-chain (+ localStorage cache) whether this wallet has ever called abandon_ghost.
-// Ghost PDA is deterministic so its tx history persists even after the account is closed.
-// localStorage is used as a fast cache to avoid an RPC round-trip on every page load.
+// Check on-chain whether this wallet previously had a ghost (abandoned or executed).
+// Method: the stake_vault token account PDA is never closed by the contract on abandon
+// (no contract redeploy needed). If stake vault exists but ghost PDA does not = abandoned.
+// localStorage caches the result for instant checks on same device.
 const ABANDON_DISC_HEX = 'cad1a6fc15343cc2'; // sha256("global:abandon_ghost")[0:8]
 
 async function checkWalletAbandoned(pubkey, ghostPdaStr) {
-  if (!pubkey || !ghostPdaStr) return false;
-  // Fast path: localStorage cache (cross-device will miss, fall through to RPC)
+  if (!pubkey) return false;
+  // Fast path: localStorage cache
   try {
-    if (localStorage.getItem('ghostAbandoned_' + pubkey)) return true;
-  } catch(e) {}
-
-  // On-chain check: if the ghost PDA has ANY transaction history but no live account,
-  // the wallet previously had a ghost (and abandoned/was executed). Block re-summon.
-  // This works even when Helius prunes old tx data — the sig index persists.
-  // Fresh wallets will have 0 sigs on their ghost PDA.
-  try {
-    console.log('[Ghost] Checking ghost PDA history for:', ghostPdaStr);
-    const sigsRes = await fetch(RPC_URL, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 'abandonCheck', method: 'getSignaturesForAddress',
-        params: [ghostPdaStr, { limit: 1, commitment: 'confirmed' }] })
-    });
-    const sigsData = await sigsRes.json();
-    const sigs = sigsData.result || [];
-    console.log('[Ghost] Ghost PDA sig count (capped at 1):', sigs.length);
-    if (sigs.length > 0) {
-      // PDA has history but no live account — wallet previously had a ghost
-      try { localStorage.setItem('ghostAbandoned_' + pubkey, '1'); } catch(e) {}
-      console.log('[Ghost] ✅ Ghost PDA has prior history — blocking re-summon for', pubkey);
+    if (localStorage.getItem('ghostAbandoned_' + pubkey)) {
+      console.log('[Ghost] Abandoned: localStorage cache hit for', pubkey);
       return true;
     }
-  } catch(e) { console.warn('[Ghost] Abandon on-chain check failed:', e); }
-  console.log('[Ghost] Ghost PDA is fresh — allowing summon for', pubkey);
+  } catch(e) {}
+
+  // Derive stake vault PDA — seeds: ["stake_vault", wallet_pubkey]
+  try {
+    const { PublicKey } = solanaWeb3;
+    const programId = new PublicKey(PROGRAM_ID);
+    const walletPk = new PublicKey(pubkey);
+    const [stakeVaultPda] = PublicKey.findProgramAddressSync(
+      [new TextEncoder().encode('stake_vault'), walletPk.toBytes()], programId
+    );
+    console.log('[Ghost] Checking stake vault:', stakeVaultPda.toString());
+
+    const res = await fetch(RPC_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'svCheck', method: 'getAccountInfo',
+        params: [stakeVaultPda.toString(), { encoding: 'base64', commitment: 'confirmed' }] })
+    });
+    const data = await res.json();
+    const exists = !!data.result?.value;
+    console.log('[Ghost] Stake vault exists:', exists);
+
+    if (exists) {
+      // Stake vault exists but ghost PDA has no live account = wallet previously had a ghost
+      try { localStorage.setItem('ghostAbandoned_' + pubkey, '1'); } catch(e) {}
+      console.log('[Ghost] ✅ Stake vault found without live ghost — blocking re-summon for', pubkey);
+      return true;
+    }
+  } catch(e) { console.warn('[Ghost] Stake vault check failed:', e); }
+
+  console.log('[Ghost] No stake vault found — fresh wallet, allowing summon for', pubkey);
   return false;
 }
 
@@ -9068,10 +9078,10 @@ async function dbAbandonOnChain() {
   });
   if (!_ok) return;
 
-  // Demo mode
+  // Demo mode — reset to none, no on-chain TX so no real abandon
   if (!ghostState.provider || ghostState.walletName?.includes('demo')) {
     showNotif('💀 Ghost abandoned [demo]', 'green');
-    ghostState.ghost = { status: 'abandoned', stakedGhost: 0, pingCount: 0, beneficiaries: [], wholeVaultShares: [] };
+    ghostState.ghost = { status: 'none', lastHeartbeat:null, intervalSeconds:365*86400, gracePeriodSeconds:30*86400, awakenedAt:null, executed:false, stakedGhost:0, pingCount:0, vaultBalance:0, recoveryWallet:null, beneficiaries:[], wholeVaultAction:0 };
     ghostState.walletConnected = true;
     saveSession();
     updateDashboardUI();
