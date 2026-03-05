@@ -4830,14 +4830,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // Show dashboard immediately on refresh — don't wait for provider re-attach
   const _wasInDashboardEarly = ghostState._wasInDashboard === true;
   if (_wasInDashboardEarly) {
-    // Show dashboard shell immediately — don't call dbShowPage yet as ghost status
-    // is still 'none' at this point and would redirect to init page incorrectly.
-    // _restoreOnce() inside the setTimeout will navigate to the correct page once
-    // chain state is loaded.
-    const dash = document.getElementById('dashboard');
-    const landing = document.getElementById('landing');
-    if (dash) dash.style.display = 'flex';
-    if (landing) landing.style.display = 'none';
+    // Open dashboard panel immediately — avoids marketing page flash on refresh.
+    // Do NOT call dbShowPage here: ghost status is still 'none' (chain not loaded)
+    // and the guard would wrongly redirect to init. _restoreOnce() handles nav.
+    const panel = document.getElementById('dashboardPanel');
+    if (panel) { panel.classList.add('open'); document.body.style.overflow = 'hidden'; }
   }
 
   setTimeout(async () => {
@@ -4877,11 +4874,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Only open dashboard if user was already inside it (not on landing page)
     const _wasInDashboard = ghostState._wasInDashboard === true;
     if (_wasInDashboard) {
-      // Show dashboard panel — open shell immediately, then restore page after chain data loads
-      const dash = document.getElementById('dashboard');
-      const landing = document.getElementById('landing');
-      if (dash) dash.style.display = 'flex';
-      if (landing) landing.style.display = 'none';
+      // Open dashboard panel — already done above if _wasInDashboardEarly, but re-ensure here
+      const panel = document.getElementById('dashboardPanel');
+      if (panel) { panel.classList.add('open'); document.body.style.overflow = 'hidden'; }
       // Restore to the last page the user was on (not always overview)
       const _savedPage = (() => {
         try {
@@ -4895,19 +4890,18 @@ document.addEventListener('DOMContentLoaded', () => {
       })();
       // Wait for fetchGhostAccount to complete before restoring page
       // so status-based guards (executed, none, abandoned) work correctly
-      const _navEl = document.getElementById('nav-' + _savedPage) || document.getElementById('nav-overview');
-      dbShowPage('overview', document.getElementById('nav-overview')); // show something immediately
-      updateHeroGhostState(); // show wallet addr immediately; status updated after chain fetch
-      checkHeroStateFromChain(); // cross-device: verify state from chain
-      // After chain data: jump to actual saved page
-      const _origFGA = fetchGhostAccount;
+      // Don't call dbShowPage before chain loads — status='none' triggers init redirect.
+      // _restoreOnce fetches chain state first, then navigates to the correct page.
+      updateHeroGhostState();
       const _restoreOnce = async () => {
-        try { await _origFGA(); } catch(e) {}
+        try { await fetchGhostAccount(); } catch(e) {}
         updateDashboardUI();
         updateHeroGhostState();
-        if (_savedPage !== 'overview') {
-          dbShowPage(_savedPage, document.getElementById('nav-' + _savedPage));
-        } else {
+        // Now that status is known, navigate to saved page (or overview as fallback)
+        const _navTarget = _savedPage !== 'overview' ? _savedPage : 'overview';
+        const _navEl = document.getElementById('nav-' + _navTarget) || document.getElementById('nav-overview');
+        dbShowPage(_navTarget, _navEl);
+        if (_navTarget === 'overview') {
           renderVaultOverview(); renderPingHistory(); renderActivityLog(); renderBeneficiaries();
           if (ghostState.ghost?.status === 'executed') renderExecutionDetail();
         }
@@ -7535,7 +7529,7 @@ async function loadWalletTokens() {
             const _now = Date.now();
             ghostState.vaultTokens = ghostState.vaultTokens.filter(v => {
               if (freshVault.find(f => f.mint === v.mint)) return true; // found on chain — keep
-              if (v._pendingDeposit && (_now - v._pendingDeposit) < 8000) return true; // recent deposit — protect
+              if (v._pendingDeposit && (_now - v._pendingDeposit) < 30000) return true; // recent deposit — protect 30s
               return false; // genuinely gone — remove
             });
             // Clear _pendingDeposit flag on tokens now confirmed on-chain
@@ -8602,19 +8596,31 @@ for (const t of solTokens) {
       resolvedVaultWsolAta = vaultKp.publicKey;
     }
 
-    // If stranded wSOL exists in a different account than wsolAta, add a transfer+syncNative to consolidate
+    // If stranded wSOL exists in a different account than wsolAta, close it first in a
+    // separate tx to return lamports to native SOL — keeps the wrap tx clean so Phantom
+    // doesn't show "could lose all funds" warning from mixed CloseAccount+SystemTransfer.
     if (strandedWsolAcct && strandedWsolAcct.toBase58() !== wsolAta.toBase58()) {
-      // Transfer stranded wSOL token balance into wsolAta via SPL transfer, then syncNative
-      // Simpler: just close stranded account back to native SOL, then wrap naturally
-      combinedTx.add(new solanaWeb3.TransactionInstruction({
-        programId: TOKEN_PROG_PK,
-        keys: [
-          { pubkey: strandedWsolAcct, isSigner: false, isWritable: true },
-          { pubkey: walletPk,         isSigner: false, isWritable: true },
-          { pubkey: walletPk,         isSigner: true,  isWritable: false },
-        ],
-        data: new Uint8Array([9]) // CloseAccount — returns lamports to wallet
-      }));
+      try {
+        const { blockhash: closeBh } = await connection.getLatestBlockhash();
+        const closeTx = new Transaction({ recentBlockhash: closeBh, feePayer: walletPk });
+        closeTx.add(new solanaWeb3.TransactionInstruction({
+          programId: TOKEN_PROG_PK,
+          keys: [
+            { pubkey: strandedWsolAcct, isSigner: false, isWritable: true },
+            { pubkey: walletPk,         isSigner: false, isWritable: true },
+            { pubkey: walletPk,         isSigner: true,  isWritable: false },
+          ],
+          data: new Uint8Array([9]) // CloseAccount opcode
+        }));
+        showNotif('Sign to reclaim stranded wSOL...', '');
+        const closeSigned = await ghostState.provider.signTransaction(closeTx);
+        const closeSig = await connection.sendRawTransaction(closeSigned.serialize(), { skipPreflight: true });
+        await connection.confirmTransaction(closeSig, 'confirmed');
+        console.log('[Ghost] Closed stranded wSOL account, reclaimed', (strandedWsolLamports/1e9).toFixed(4), 'SOL');
+      } catch(closeErr) {
+        console.warn('[Ghost] Could not close stranded wSOL — continuing without sweep:', closeErr);
+        // Still proceed with deposit using only native SOL amount
+      }
     }
     const amountRaw = BigInt(totalLamports);
     const buf = new ArrayBuffer(8); new DataView(buf).setBigUint64(0, amountRaw, true);
