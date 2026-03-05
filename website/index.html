@@ -5258,12 +5258,15 @@ async function sendPing() {
       });
     }
   } else {
-    // Overview orb — reset to centered flex (original behaviour)
-    ripple.style.justifyContent = '';
-    ripple.style.alignItems = '';
+    // Overview orb — position at its actual screen coords via getBoundingClientRect
+    const r = orb.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    ripple.style.justifyContent = 'unset';
+    ripple.style.alignItems = 'unset';
     Array.from(ripple.children).forEach(ring => {
-      ring.style.left = '';
-      ring.style.top  = '';
+      ring.style.left = (cx - 40) + 'px';
+      ring.style.top  = (cy - 40) + 'px';
     });
   }
   ripple.classList.add('active');
