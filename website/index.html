@@ -587,8 +587,8 @@
   .db-info strong { color: #e8e8f8; }
 
   /* Ping ripple */
-  .ping-ripple { position: fixed; inset: 0; pointer-events: none; z-index: 10000; display: none; align-items: center; justify-content: center; }
-  .ping-ripple.active { display: flex; }
+  .ping-ripple { position: fixed; inset: 0; pointer-events: none; z-index: 10000; display: none; }
+  .ping-ripple.active { display: block; }
   .ping-ripple-ring { position: absolute; width: 80px; height: 80px; border-radius: 50%; border: 2px solid rgba(180,30,60,0.7); animation: ripple-out 1s ease-out forwards; }
   .ping-ripple-ring:nth-child(2) { animation-delay: 0.12s; }
   .ping-ripple-ring:nth-child(3) { animation-delay: 0.24s; }
@@ -5242,33 +5242,16 @@ async function sendPing() {
 
   orb.classList.add('beat');
 
-  // Position ripple at whichever button triggered it — hbSendBtn (heartbeat page) or hbOrb (overview)
+  // Position rings at center of whichever button was clicked
   const _onHbPage = document.getElementById('db-page-heartbeat')?.style.display !== 'none';
-  if (_onHbPage) {
-    const _btn = document.getElementById('hbSendBtn');
-    if (_btn) {
-      const r = _btn.getBoundingClientRect();
-      const cx = r.left + r.width / 2;
-      const cy = r.top + r.height / 2;
-      ripple.style.justifyContent = 'unset';
-      ripple.style.alignItems = 'unset';
-      Array.from(ripple.children).forEach(ring => {
-        ring.style.left = (cx - 40) + 'px';
-        ring.style.top  = (cy - 40) + 'px';
-      });
-    }
-  } else {
-    // Overview orb — position at its actual screen coords via getBoundingClientRect
-    const r = orb.getBoundingClientRect();
-    const cx = r.left + r.width / 2;
-    const cy = r.top + r.height / 2;
-    ripple.style.justifyContent = 'unset';
-    ripple.style.alignItems = 'unset';
-    Array.from(ripple.children).forEach(ring => {
-      ring.style.left = (cx - 40) + 'px';
-      ring.style.top  = (cy - 40) + 'px';
-    });
-  }
+  const _srcEl = _onHbPage ? (document.getElementById('hbSendBtn') || orb) : orb;
+  const _r = _srcEl.getBoundingClientRect();
+  const _cx = _r.left + _r.width / 2;
+  const _cy = _r.top + _r.height / 2;
+  Array.from(ripple.children).forEach(ring => {
+    ring.style.left = (_cx - 40) + 'px';
+    ring.style.top  = (_cy - 40) + 'px';
+  });
   ripple.classList.add('active');
   setTimeout(() => { orb.classList.remove('beat'); ripple.classList.remove('active'); }, 1200);
 
