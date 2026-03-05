@@ -9955,7 +9955,7 @@ function syncSettingsDisplay() {
   if (el('settingsStakedVal')) {
     const _ssAmt = g.stakedGhost || 10000;
     const _ssPrice = PRICE_CACHE[GHOST_MINT] || 0;
-    const _ssUsd = _ssPrice > 0 ? '<span style="font-size:11px;color:#9090b8;margin-left:6px">u2248 $' + (_ssAmt * _ssPrice).toLocaleString(undefined,{maximumFractionDigits:2}) + '</span>' : '';
+    const _ssUsd = _ssPrice > 0 ? '<span style="font-size:11px;color:#9090b8;margin-left:6px">≈ $' + (_ssAmt * _ssPrice).toLocaleString(undefined,{maximumFractionDigits:2}) + '</span>' : '';
     el('settingsStakedVal').innerHTML = _ssAmt.toLocaleString() + ' $GHOST' + _ssUsd;
   }
 }
