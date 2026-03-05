@@ -978,7 +978,7 @@
           <!-- Distribution report -->
           <div style="position:relative;z-index:1;padding:20px 20px 4px">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-              <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.22em;color:rgba(160,140,200,0.5);text-transform:uppercase">Legacy Distribution</div>
+              <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:15px;letter-spacing:0.08em;color:rgba(210,180,255,0.85);text-transform:uppercase">Legacy Distribution</div>
               <div id="dbExecTotalValue" style="font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(120,100,160,0.45)"></div>
             </div>
             <!-- Corner brackets on the body container -->
@@ -1001,7 +1001,7 @@
             <div style="position:absolute;bottom:-3px;right:-3px;width:8px;height:8px;border-bottom:1.5px solid rgba(102,51,255,0.3);border-right:1.5px solid rgba(102,51,255,0.3)"></div>
             <div style="width:22px;height:22px;flex-shrink:0;overflow:hidden" id="dbExecStakeLogo"></div>
             <div style="flex:1;min-width:0">
-              <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:rgba(180,140,255,0.8)"><strong id="dbExecutedStake">—</strong> $GHOST staked · locked on-chain</div>
+              <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:15px;color:rgba(190,155,255,0.95)"><span id="dbExecutedStake">—</span> <span style="color:rgba(150,120,220,0.8);font-size:12px;font-weight:400">$GHOST staked · locked on-chain</span></div>
               <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(80,70,110,0.8);margin-top:2px">5% paid as executor bounty · Reclaim remaining — 50% burn penalty applies</div>
             </div>
             <button onclick="dbAbandonOnChain()" style="background:transparent;border:1px solid rgba(102,51,255,0.3);color:rgba(160,130,255,0.8);font-family:'Share Tech Mono',monospace;font-size:10px;padding:5px 12px;cursor:pointer;letter-spacing:0.1em;white-space:nowrap;flex-shrink:0;transition:all 0.2s" onmouseover="this.style.borderColor='rgba(140,100,255,0.6)';this.style.color='#c0a0ff'" onmouseout="this.style.borderColor='rgba(102,51,255,0.3)';this.style.color='rgba(160,130,255,0.8)'">RECLAIM →</button>
@@ -5429,9 +5429,21 @@ async function renderExecutionDetail() {
       ? '<span style="font-family:monospace;font-size:9px;padding:2px 8px;letter-spacing:0.14em;background:rgba(51,255,153,0.06);border:1px solid rgba(51,255,153,0.18);color:#33ff99">' + (isBurn ? 'BURNED' : 'SENT') + '</span>'
       : '<span style="font-family:monospace;font-size:9px;padding:2px 8px;letter-spacing:0.14em;background:rgba(255,170,51,0.06);border:1px solid rgba(255,170,51,0.18);color:#ffaa33">PENDING</span>';
 
+    // Find a tx sig for this group from activity log
+    const _grpTx = (() => {
+      for (const e of (ghostState.activityLog||[])) {
+        if (!e.tx || e.tx.length < 20) continue;
+        if (isBurn && e.msg && e.msg.toLowerCase().includes('burn')) return e.tx;
+        if (!isBurn && grp.recipientFull && e.msg && (e.msg.includes(grp.recipient) || e.msg.includes(grp.recipientFull.slice(0,4)))) return e.tx;
+      }
+      return null;
+    })();
+    const _solscanLink = _grpTx
+      ? ' <a href="https://solscan.io/tx/' + _grpTx + '" target="_blank" rel="noopener" style="font-family:monospace;font-size:9px;color:#7766aa;text-decoration:none;border:1px solid rgba(102,51,255,0.2);padding:1px 5px;margin-left:4px;vertical-align:middle" onmouseover="this.style.color=&quot;#aa88ff&quot;" onmouseout="this.style.color=&quot;#7766aa&quot;">&#x2197; solscan</a>'
+      : '';
     const destLabel = isBurn
-      ? '<span style="font-size:11px">&#x1F525;</span><span style="font-family:monospace;font-size:11px;color:#ff7755"> Burned</span>'
-      : '<span style="font-size:10px;color:#5a5a7a">\u2192</span><span style="font-family:monospace;font-size:11px;color:#c0bce0" title="' + grp.recipientFull + '"> ' + grp.recipient + '</span>';
+      ? '<span style="font-size:11px">&#x1F525;</span><span style="font-family:monospace;font-size:11px;color:#ff7755"> Burned</span>' + _solscanLink
+      : '<span style="font-size:10px;color:#5a5a7a">\u2192</span><span style="font-family:monospace;font-size:11px;color:#c0bce0" title="' + grp.recipientFull + '"> ' + grp.recipient + '</span>' + _solscanLink;
 
     html += '<div style="padding:16px 20px;' + borderB + '">'
           + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">'
@@ -5552,7 +5564,8 @@ async function renderActivityLog() {
     const timeStr = d.toLocaleDateString('en-GB', {day:'numeric',month:'short'}) + ' ' + d.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
     const fullSig = entry.tx||'';
     const short = fullSig.length>12 ? fullSig.slice(0,4)+'...'+fullSig.slice(-4) : fullSig;
-    const cpBtn = fullSig ? '<button onclick="copyAddr(\'' + fullSig + '\')" title="Copy tx signature" style="background:none;border:1px solid rgba(102,51,255,0.25);color:#8888bb;font-size:10px;padding:1px 5px;cursor:pointer;margin-left:4px;font-family:\'Share Tech Mono\',monospace;vertical-align:middle;line-height:1.4">\u29C9</button>' : '';
+    const _isSolscanable = fullSig && fullSig.length > 20;
+    const cpBtn = _isSolscanable ? '<a href="https://solscan.io/tx/' + fullSig + '" target="_blank" rel="noopener" title="View on Solscan" style="display:inline-flex;align-items:center;gap:3px;background:none;border:1px solid rgba(102,51,255,0.2);color:#7766aa;font-size:9px;padding:1px 6px;margin-left:4px;font-family:\'Share Tech Mono\',monospace;vertical-align:middle;line-height:1.6;text-decoration:none;transition:all 0.2s" onmouseover="this.style.color=\'#aa88ff\';this.style.borderColor=\'rgba(160,120,255,0.4)\'" onmouseout="this.style.color=\'#7766aa\';this.style.borderColor=\'rgba(102,51,255,0.2)\'">↗ solscan</a>' : (fullSig ? '<span style="font-family:\'Share Tech Mono\',monospace;font-size:10px;color:#4a4a6a">' + short + '</span>' : '');
 
     let iconHtml = '';
     if (entry.icon === 'angel') iconHtml = _angelSvg;
