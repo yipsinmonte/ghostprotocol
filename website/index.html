@@ -5242,15 +5242,22 @@ async function sendPing() {
 
   orb.classList.add('beat');
 
-  // Position rings at center of whichever button was clicked
+  // Determine source element
   const _onHbPage = document.getElementById('db-page-heartbeat')?.style.display !== 'none';
   const _srcEl = _onHbPage ? (document.getElementById('hbSendBtn') || orb) : orb;
   const _r = _srcEl.getBoundingClientRect();
   const _cx = _r.left + _r.width / 2;
   const _cy = _r.top + _r.height / 2;
-  Array.from(ripple.children).forEach(ring => {
+
+  // Recreate rings so animation always restarts from correct position
+  ripple.innerHTML = '';
+  [0, 120, 240].forEach(delay => {
+    const ring = document.createElement('div');
+    ring.className = 'ping-ripple-ring';
     ring.style.left = (_cx - 40) + 'px';
     ring.style.top  = (_cy - 40) + 'px';
+    ring.style.animationDelay = delay + 'ms';
+    ripple.appendChild(ring);
   });
   ripple.classList.add('active');
   setTimeout(() => { orb.classList.remove('beat'); ripple.classList.remove('active'); }, 1200);
