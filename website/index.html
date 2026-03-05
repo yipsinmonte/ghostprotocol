@@ -3604,11 +3604,32 @@ function updateDashboardUI() {
         if (_stakeSection) _stakeSection.style.opacity = '1';
         if (_stakeLabel) _stakeLabel.textContent = 'Minimum 10,000 $GHOST required';
         if (_stakeInput) { _stakeInput.disabled = false; _stakeInput.style.opacity = '1'; if (!_stakeInput.value || _stakeInput.value === '0') _stakeInput.value = '10000'; }
-        // Async check: if wallet has abandoned before, update UI (RPC may take a moment)
-        if (ghostState.publicKey && ghostState.ghostPda) {
+        // Sync check from localStorage cache — blocks button immediately on render
+        let _alreadyAbandoned = false;
+        if (ghostState.publicKey) {
+          try {
+            if (localStorage.getItem('ghostAbandoned_' + ghostState.publicKey)) {
+              _alreadyAbandoned = true;
+              _updateInitPageForAbandoned();
+            }
+          } catch(e) {}
+        }
+        // Async RPC check — catches cross-device cases where localStorage is empty
+        if (!_alreadyAbandoned && ghostState.publicKey && ghostState.ghostPda) {
+          // Disable button and show checking state while RPC resolves
+          const _sb = document.querySelector('#db-page-init button[onclick*="initializeGhost"]');
+          if (_sb) { _sb.disabled = true; _sb.textContent = '⟳ Checking wallet history...'; _sb.style.opacity = '0.6'; }
           checkWalletAbandoned(ghostState.publicKey, ghostState.ghostPda).then(abandoned => {
-            if (abandoned) _updateInitPageForAbandoned();
-          }).catch(() => {});
+            if (abandoned) {
+              _updateInitPageForAbandoned();
+            } else {
+              // Re-enable button — wallet is clean
+              if (_sb) { _sb.disabled = false; _sb.textContent = '👻 Summon Ghost'; _sb.style.opacity = '1'; }
+            }
+          }).catch(() => {
+            // RPC failed — re-enable so user isn't stuck
+            if (_sb) { _sb.disabled = false; _sb.textContent = '👻 Summon Ghost'; _sb.style.opacity = '1'; }
+          });
         }
       }
     }
