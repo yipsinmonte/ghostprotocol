@@ -3533,16 +3533,6 @@ function _updateInitPageForAbandoned() {
       '.tombstone-fog{position:absolute;inset:0;background:radial-gradient(ellipse 70% 55% at 50% 40%,rgba(120,0,0,0.28) 0%,rgba(60,0,30,0.12) 50%,transparent 80%);pointer-events:none;z-index:0}',
       '.tombstone-vignette{position:absolute;inset:0;background:radial-gradient(ellipse 100% 100% at 50% 50%,transparent 40%,rgba(0,0,0,0.75) 100%);pointer-events:none;z-index:1}',
       '.tombstone-scanlines{position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.1) 3px,rgba(0,0,0,0.1) 4px);pointer-events:none;z-index:2;opacity:0.6}',
-      '.tombstone-web{position:absolute;width:190px;height:190px;pointer-events:none;z-index:3;opacity:0.5}',
-      '.tombstone-web-tl{top:0;left:0}',
-      '.tombstone-web-tr{top:0;right:0;transform:scaleX(-1);transform-origin:top right}',
-      '.tombstone-web-bl{bottom:0;left:0;transform:scaleY(-1);transform-origin:bottom left}',
-      '.tombstone-web-br{bottom:0;right:0;transform:scale(-1,-1);transform-origin:bottom right}',
-      '.tombstone-spider-wrap{position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:10;display:flex;flex-direction:column;align-items:center;animation:spiderDrop 1.4s cubic-bezier(0.22,1,0.36,1) both,spiderSway 4s ease-in-out 1.4s infinite}',
-      '.tombstone-thread{width:1px;height:80px;background:linear-gradient(to bottom,rgba(160,140,180,0.35),rgba(160,140,180,0.15));flex-shrink:0}',
-      '.tombstone-spider{font-size:28px;line-height:1;filter:drop-shadow(0 0 6px rgba(255,30,30,0.9)) drop-shadow(0 0 14px rgba(255,0,0,0.5))}',
-      '@keyframes spiderDrop{from{transform:translateX(-50%) translateY(-130px);opacity:0}to{transform:translateX(-50%) translateY(0);opacity:1}}',
-      '@keyframes spiderSway{0%,100%{transform:translateX(calc(-50% - 6px)) rotate(-5deg)}50%{transform:translateX(calc(-50% + 6px)) rotate(5deg)}}',
       '.tombstone-ghost-wrap{position:relative;z-index:5;margin-bottom:20px;margin-top:24px}',
       '.tombstone-ghost-svg{width:110px;height:130px;animation:tbFloat 4s ease-in-out infinite,ghostFlicker 6s ease-in-out infinite}',
       '@keyframes tbFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}',
@@ -3570,34 +3560,6 @@ function _updateInitPageForAbandoned() {
 
   var _wallet = ghostState.publicKey || '';
   var _ws = _wallet ? _wallet.slice(0,6) + '\u00B7\u00B7\u00B7' + _wallet.slice(-6) : '\u2014';
-
-  function _webSVG() {
-    /* SVG viewBox anchored at (0,0) = corner. All strands radiate FROM (0,0).
-       CSS flips (scaleX/scaleY) are applied with transform-origin at the
-       matching corner so the (0,0) point stays pinned to the screen corner. */
-    return '<svg viewBox="0 0 220 220" fill="none" xmlns="http://www.w3.org/2000/svg">' +
-      /* radial strands — 8 rays from (0,0) */
-      '<line x1="0" y1="0" x2="220" y2="220" stroke="rgba(210,190,235,0.7)"  stroke-width="0.9"/>' +
-      '<line x1="0" y1="0" x2="155" y2="220" stroke="rgba(210,190,235,0.65)" stroke-width="0.8"/>' +
-      '<line x1="0" y1="0" x2="90"  y2="220" stroke="rgba(210,190,235,0.6)"  stroke-width="0.8"/>' +
-      '<line x1="0" y1="0" x2="30"  y2="220" stroke="rgba(210,190,235,0.55)" stroke-width="0.7"/>' +
-      '<line x1="0" y1="0" x2="0"   y2="220" stroke="rgba(210,190,235,0.55)" stroke-width="0.7"/>' +
-      '<line x1="0" y1="0" x2="220" y2="155" stroke="rgba(210,190,235,0.65)" stroke-width="0.8"/>' +
-      '<line x1="0" y1="0" x2="220" y2="90"  stroke="rgba(210,190,235,0.6)"  stroke-width="0.8"/>' +
-      '<line x1="0" y1="0" x2="220" y2="30"  stroke="rgba(210,190,235,0.55)" stroke-width="0.7"/>' +
-      '<line x1="0" y1="0" x2="220" y2="0"   stroke="rgba(210,190,235,0.55)" stroke-width="0.7"/>' +
-      /* concentric arc rings — all start and end ON the two axes, centred at (0,0) */
-      '<path d="M0,36  Q18,18  36,0"  stroke="rgba(200,175,230,0.7)"  stroke-width="0.9" fill="none"/>' +
-      '<path d="M0,72  Q36,36  72,0"  stroke="rgba(200,175,230,0.68)" stroke-width="0.85" fill="none"/>' +
-      '<path d="M0,108 Q54,54  108,0" stroke="rgba(200,175,230,0.62)" stroke-width="0.8" fill="none"/>' +
-      '<path d="M0,144 Q72,72  144,0" stroke="rgba(200,175,230,0.55)" stroke-width="0.75" fill="none"/>' +
-      '<path d="M0,180 Q90,90  180,0" stroke="rgba(200,175,230,0.48)" stroke-width="0.7" fill="none"/>' +
-      '<path d="M0,220 Q110,110 220,0" stroke="rgba(200,175,230,0.38)" stroke-width="0.65" fill="none"/>' +
-      /* tiny spider body pinned at corner */
-      '<circle cx="5" cy="5" r="3.5" fill="rgba(180,20,20,0.75)"/>' +
-      '<circle cx="5" cy="5" r="5.5" fill="rgba(180,20,20,0.2)"/>' +
-    '</svg>';
-  }
 
   var _ghostSVG =
     '<svg class="tombstone-ghost-svg" viewBox="0 0 110 130" fill="none" xmlns="http://www.w3.org/2000/svg">' +
@@ -3642,14 +3604,6 @@ function _updateInitPageForAbandoned() {
       '<div class="tombstone-fog"></div>' +
       '<div class="tombstone-vignette"></div>' +
       '<div class="tombstone-scanlines"></div>' +
-      '<div class="tombstone-web tombstone-web-tl">' + _webSVG() + '</div>' +
-      '<div class="tombstone-web tombstone-web-tr">' + _webSVG() + '</div>' +
-      '<div class="tombstone-web tombstone-web-bl">' + _webSVG() + '</div>' +
-      '<div class="tombstone-web tombstone-web-br">' + _webSVG() + '</div>' +
-      '<div class="tombstone-spider-wrap">' +
-        '<div class="tombstone-thread"></div>' +
-        '<div class="tombstone-spider">\uD83D\uDD77</div>' +
-      '</div>' +
       '<div class="tombstone-ghost-wrap">' + _ghostSVG + '</div>' +
       '<div class="tombstone-title">GHOST <span class="ts-closed">CLOSED</span></div>' +
       '<div class="tombstone-rule"></div>' +
