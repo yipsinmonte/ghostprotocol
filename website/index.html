@@ -9709,19 +9709,24 @@ async function dbWithdrawAsset(mintKey) {
     // would make the blockhash stale by the time we send, causing simulation failures
     const ownerAtaInfo = await connection.getAccountInfo(ownerAta);
 
-    // If owner ATA missing — create it in a separate tx first, then withdraw
-    // Bundling ATA creation + withdraw in one tx gets dropped by validator
+    // If owner ATA missing — create receive account in separate confirmed tx first
+    // ATA program is unreliable on Helius nodes (same issue as wSOL wrap).
+    // Use manual SystemProgram.createAccount + InitializeAccount3 instead — always works.
+    let receiveAcct = ownerAta;
     if (!ownerAtaInfo) {
-      console.log('[Ghost] Owner ATA missing — creating in separate tx first');
+      console.log('[Ghost] Owner ATA missing — creating manual receive account');
       showNotif('Creating token account...', '');
+      const { createIx, initIx, kp: receiveKp } = await buildManualTokenAccountIxs(walletPk, withdrawMintPk, walletPk, rawTokenProgPk, connection);
+      receiveAcct = receiveKp.publicKey;
       const { blockhash: bh0 } = await connection.getLatestBlockhash();
-      const ataTx = new Transaction({ recentBlockhash: bh0, feePayer: walletPk });
-      ataTx.add(createATAInstruction(walletPk, ownerAta, walletPk, withdrawMintPk, rawTokenProgPk));
-      const ataSigned = await ghostState.provider.signTransaction(ataTx);
-      const ataSig = await connection.sendRawTransaction(ataSigned.serialize(), { skipPreflight: true, preflightCommitment: 'confirmed' });
-      const ataConf = await connection.confirmTransaction(ataSig, 'confirmed');
-      if (ataConf.value?.err) throw new Error('ATA creation failed: ' + JSON.stringify(ataConf.value.err));
-      console.log('[Ghost] Owner ATA created:', ownerAta.toBase58());
+      const createTx = new Transaction({ recentBlockhash: bh0, feePayer: walletPk });
+      createTx.add(createIx, initIx);
+      const createSigned = await ghostState.provider.signTransaction(createTx);
+      createSigned.partialSign(receiveKp);
+      const createSig = await connection.sendRawTransaction(createSigned.serialize(), { skipPreflight: true });
+      const createConf = await connection.confirmTransaction(createSig, 'confirmed');
+      if (createConf.value?.err) throw new Error('Token account creation failed: ' + JSON.stringify(createConf.value.err));
+      console.log('[Ghost] Receive account created:', receiveAcct.toBase58());
     }
 
     // Fetch blockhash last — minimises time between fetch and send
@@ -9734,12 +9739,12 @@ async function dbWithdrawAsset(mintKey) {
         { pubkey: vaultPda,       isSigner: false, isWritable: false },
         { pubkey: walletPk,       isSigner: true,  isWritable: true  },
         { pubkey: withdrawMintPk, isSigner: false, isWritable: false },
-        { pubkey: ownerAta,       isSigner: false, isWritable: true  },
+        { pubkey: receiveAcct,    isSigner: false, isWritable: true  },
         { pubkey: vaultAta,       isSigner: false, isWritable: true  },
         { pubkey: rawTokenProgPk, isSigner: false, isWritable: false },
       ], data }));
 
-    console.log('[Ghost] single withdraw — ownerAta:', ownerAta.toBase58(), 'vaultAta:', vaultAta.toBase58());
+    console.log('[Ghost] single withdraw — receiveAcct:', receiveAcct.toBase58(), 'vaultAta:', vaultAta.toBase58());
     const signed = await ghostState.provider.signTransaction(tx);
     let sig;
     try {
