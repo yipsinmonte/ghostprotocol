@@ -8145,9 +8145,11 @@ async function dbMigrateAccount() {
     const { blockhash } = await connection.getLatestBlockhash();
     const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPubkey });
     tx.add(ix);
-    tx.instructions.forEach((ix, i) =>
-      console.log(`[Ghost] ix${i}: prog=${ix.programId.toBase58()} accounts=${ix.keys.length} data=${ix.data.length}b`)
-    );
+    tx.instructions.forEach((ix, i) => {
+      console.log(`[Ghost] ix${i}: prog=${ix.programId.toBase58()} accounts=${ix.keys.length} data=${ix.data.length}b`);
+      ix.keys.forEach((k, j) => console.log(`  [Ghost]   k${j}: ${k.pubkey.toBase58()} signer=${k.isSigner} writable=${k.isWritable}`));
+    });
+    console.log('[Ghost] single withdraw accounts — ghostPda:', ghostPda.toBase58(), 'vaultPda:', vaultPda.toBase58(), 'vaultAta:', vaultAta.toBase58(), 'ownerAta:', ownerAta.toBase58());
     const signed = await ghostState.provider.signTransaction(tx);
     const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: true, preflightCommitment: 'confirmed' });
     console.log('[Ghost] Migrate TX sent:', sig);
@@ -9727,9 +9729,11 @@ async function dbWithdrawAsset(mintKey) {
         { pubkey: rawTokenProgPk, isSigner: false, isWritable: false },
       ], data }));
 
-    tx.instructions.forEach((ix, i) =>
-      console.log(`[Ghost] ix${i}: prog=${ix.programId.toBase58()} accounts=${ix.keys.length} data=${ix.data.length}b`)
-    );
+    tx.instructions.forEach((ix, i) => {
+      console.log(`[Ghost] ix${i}: prog=${ix.programId.toBase58()} accounts=${ix.keys.length} data=${ix.data.length}b`);
+      ix.keys.forEach((k, j) => console.log(`  [Ghost]   k${j}: ${k.pubkey.toBase58()} signer=${k.isSigner} writable=${k.isWritable}`));
+    });
+    console.log('[Ghost] single withdraw accounts — ghostPda:', ghostPda.toBase58(), 'vaultPda:', vaultPda.toBase58(), 'vaultAta:', vaultAta.toBase58(), 'ownerAta:', ownerAta.toBase58());
     const signed = await ghostState.provider.signTransaction(tx);
     let sig;
     try {
@@ -10040,9 +10044,11 @@ async function dbAbandonOnChain() {
     const { blockhash } = await connection.getLatestBlockhash();
     const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPubkey });
     tx.add(ix);
-    tx.instructions.forEach((ix, i) =>
-      console.log(`[Ghost] ix${i}: prog=${ix.programId.toBase58()} accounts=${ix.keys.length} data=${ix.data.length}b`)
-    );
+    tx.instructions.forEach((ix, i) => {
+      console.log(`[Ghost] ix${i}: prog=${ix.programId.toBase58()} accounts=${ix.keys.length} data=${ix.data.length}b`);
+      ix.keys.forEach((k, j) => console.log(`  [Ghost]   k${j}: ${k.pubkey.toBase58()} signer=${k.isSigner} writable=${k.isWritable}`));
+    });
+    console.log('[Ghost] single withdraw accounts — ghostPda:', ghostPda.toBase58(), 'vaultPda:', vaultPda.toBase58(), 'vaultAta:', vaultAta.toBase58(), 'ownerAta:', ownerAta.toBase58());
     const signed = await ghostState.provider.signTransaction(tx);
     const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: true, preflightCommitment: 'confirmed' });
     console.log('[Ghost] Abandon TX sent:', sig);
