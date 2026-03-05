@@ -332,12 +332,37 @@
     font-family: 'Share Tech Mono', monospace;
     font-size: 13px; letter-spacing: 0.08em; color: #33ff99;
     display: flex; align-items: center; gap: 8px;
+    transition: color 0.4s;
   }
   .panel-wallet-dot {
     width: 6px; height: 6px; border-radius: 50%;
     background: #33ff99;
     animation: pulse-dot 2s ease-in-out infinite;
+    transition: background 0.4s, box-shadow 0.4s;
   }
+  /* Executed dashboard header — hot red, full brightness */
+  .panel-topbar.executed {
+    background: rgba(18,2,6,0.99) !important;
+    border-bottom-color: rgba(220,30,55,0.4) !important;
+    box-shadow: 0 1px 16px rgba(200,20,45,0.18);
+  }
+  .panel-topbar.executed .panel-wallet { color: #ff3355 !important; }
+  .panel-topbar.executed .panel-wallet-dot {
+    background: #ff3355 !important; animation: none !important;
+    box-shadow: 0 0 8px rgba(255,40,70,0.7) !important;
+  }
+  .panel-topbar.executed .panel-logo { color: #f0e0e4 !important; }
+  .panel-topbar.executed .panel-logo span { color: #cc1133 !important; }
+  /* Abandoned dashboard header — cold ash, full saturation but muted hue */
+  .panel-topbar.abandoned {
+    background: rgba(10,5,8,0.99) !important;
+    border-bottom-color: rgba(120,55,75,0.3) !important;
+  }
+  .panel-topbar.abandoned .panel-wallet { color: #a06070 !important; }
+  .panel-topbar.abandoned .panel-wallet-dot {
+    background: #804055 !important; animation: none !important; box-shadow: none !important;
+  }
+  .panel-topbar.abandoned .panel-logo span { color: #60304a !important; }
 
   /* Panel body = sidebar + main */
   .panel-body {
@@ -1913,6 +1938,8 @@ async function updateHeroGhostState() {
     el.classList.remove('executed', 'abandoned');
     if (deadClass) el.classList.add(deadClass);
   }
+  // Dashboard topbar
+  setDeadClass(document.getElementById('dashboardPanel')?.querySelector('.panel-topbar'));
 
   // ── Wallet address label ──
   const wsEl = document.getElementById('walletStatus');
@@ -4748,9 +4775,25 @@ async function disconnectWallet() {
   ghostState.recoveryWallets = [];
   ghostState.selectedTokens = {};
   const btn = document.getElementById('walletBtn');
-  if (btn) { btn.textContent = 'Connect Wallet'; btn.classList.remove('connected'); btn.onclick = openModal; }
-  document.getElementById('navDashboardLink')?.classList.remove('visible');
+  if (btn) { btn.textContent = 'Connect Wallet'; btn.classList.remove('connected', 'executed', 'abandoned'); btn.onclick = openModal; }
+  document.getElementById('navDashboardLink')?.classList.remove('visible', 'executed', 'abandoned');
   document.getElementById('navDisconnectBtn').style.display = 'none';
+  // Reset hero + topbar to fresh state
+  document.querySelectorAll('.btn-register').forEach(b => { b.classList.remove('executed','abandoned'); b.removeAttribute('disabled'); });
+  const _topbar = document.getElementById('dashboardPanel')?.querySelector('.panel-topbar');
+  if (_topbar) _topbar.classList.remove('executed', 'abandoned');
+  const _wsEl = document.getElementById('walletStatus');
+  if (_wsEl) { _wsEl.textContent = '— Waiting for pulse'; _wsEl.style.color = ''; }
+  const _hbLine = document.getElementById('hbLine');
+  const _hbLabel = document.getElementById('hbLabel');
+  const _hbPoly = document.getElementById('hbPolyline');
+  const _hbPulse = document.getElementById('hbPulseText');
+  if (_hbLine) _hbLine.classList.remove('executed', 'abandoned');
+  if (_hbLabel) _hbLabel.classList.remove('executed', 'abandoned');
+  if (_hbPoly) { _hbPoly.setAttribute('points','0,30 120,30 140,30 155,8 165,52 175,15 185,45 195,30 350,30 420,30 440,30 700,30 700,30 820,30 840,30 855,8 865,52 875,15 885,45 895,30 1050,30 1120,30 1140,30 1400,30'); _hbPoly.setAttribute('stroke','#00ff88'); _hbPoly.setAttribute('opacity','0.8'); }
+  if (_hbPulse) _hbPulse.textContent = 'PULSE DETECTED';
+  const _hbDot = document.querySelector('.hb-pulse-dot');
+  if (_hbDot) { _hbDot.style.background = ''; _hbDot.style.animation = ''; _hbDot.style.boxShadow = ''; }
   closeDashboard();
   showNotif('👻 Wallet disconnected — your ghost rests.', '');
 }
