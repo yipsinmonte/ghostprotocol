@@ -3339,7 +3339,8 @@ async function fetchOnChainHistory() {
           if (bene) {
             const shortR = bene.fullAddr ? bene.fullAddr.slice(0,4)+'...'+bene.fullAddr.slice(-4) : (bene.recipient||'');
             const _amt = bene.amount ? (bene.amount >= 1000 ? bene.amount.toLocaleString(undefined,{maximumFractionDigits:2}) : parseFloat(bene.amount.toPrecision(4)).toString()) : '';
-            return `🪙 ${_amt} ${bene.token||''} → ${shortR}`;
+            const _sym = (bene.mint && MINT_TO_SYMBOL[bene.mint]) || bene.token || '';
+            return `🪙 ${_amt} ${_sym} → ${shortR}`;
           }
         } catch(_) {}
         return '📤 Token transfer executed';
@@ -3354,7 +3355,7 @@ async function fetchOnChainHistory() {
           const full_b=[...new Array(leading_b).fill(0),...bytes_b];
           const bIdxB = full_b[8];
           const beneB = (ghostState.ghost?.beneficiaries||[])[bIdxB];
-          if (beneB) { const _a = beneB.amount ? (beneB.amount >= 1000 ? beneB.amount.toLocaleString(undefined,{maximumFractionDigits:2}) : parseFloat(beneB.amount.toPrecision(4)).toString()) : ''; return `🔥 ${_a} ${beneB.token||''} burned`; }
+          if (beneB) { const _a = beneB.amount ? (beneB.amount >= 1000 ? beneB.amount.toLocaleString(undefined,{maximumFractionDigits:2}) : parseFloat(beneB.amount.toPrecision(4)).toString()) : ''; const _bSym = (beneB.mint && MINT_TO_SYMBOL[beneB.mint]) || beneB.token || ''; return `🔥 ${_a} ${_bSym} burned`; }
         } catch(_) {}
         return '🔥 Token burn executed';
       }
@@ -5591,9 +5592,9 @@ async function renderActivityLog() {
     for (const mint of _allMints) {
       const sym = MINT_TO_SYMBOL[mint];
       if (!sym || sym.includes('…') || sym === mint || sym.length > 12) continue;
-      // Replace all truncation styles: "Ab1C…xyz9", "Ab1C...xyz9", "Ab1C_pump" (last 4)
-      const s4 = mint.slice(0,4), e4 = mint.slice(-4);
-      [s4+'…'+e4, s4+'...'+e4].forEach(pat => {
+      // Replace all truncation styles: "Ab1C…xyz9", "Ab1C...xyz9", and 6-char prefix fallback
+      const s4 = mint.slice(0,4), e4 = mint.slice(-4), s6 = mint.slice(0,6);
+      [s4+'…'+e4, s4+'...'+e4, s6].forEach(pat => {
         if (msg.includes(pat)) msg = msg.split(pat).join(sym);
       });
     }
