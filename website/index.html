@@ -2165,6 +2165,25 @@ function promptRenameWallet(addr, shortAddr) {
   saveWalletNickname(addr, name.trim());
   renderBeneficiaries();
 }
+// Resolve ben.token → display symbol
+// ben.token may be: real symbol ('pippin'), truncated mint ('Dfh5Dz'), or full mint
+function resolveBeneToken(token) {
+  if (!token) return '?';
+  // Direct MINT_TO_SYMBOL lookup (full mint key)
+  if (MINT_TO_SYMBOL[token]) return MINT_TO_SYMBOL[token];
+  // Check vaultTokens/walletTokens by symbol match (already correct)
+  const all = [...(ghostState.vaultTokens||[]),...(ghostState.walletTokens||[])];
+  const bySymbol = all.find(t => t.symbol === token);
+  if (bySymbol) return token; // it's already a real symbol
+  // token might be a truncated mint (first 6 chars) — reverse lookup
+  const byTrunc = all.find(t => t.mint && t.mint.startsWith(token) && t.symbol);
+  if (byTrunc) { MINT_TO_SYMBOL[byTrunc.mint] = byTrunc.symbol; return byTrunc.symbol; }
+  // Scan all MINT_TO_SYMBOL keys for truncated match
+  for (const [mint, sym] of Object.entries(MINT_TO_SYMBOL)) {
+    if (mint.startsWith(token)) return sym;
+  }
+  return token; // fallback
+}
 function resolveMintSymbol(mint) {
   if (!mint) return '';
   if (MINT_TO_SYMBOL[mint]) return MINT_TO_SYMBOL[mint];
@@ -5689,9 +5708,15 @@ function renderBeneficiaries() {
     const over = vt && ben.amount > vt.balance;
     rows += `<tr${over ? ' style="background:rgba(255,61,90,0.05)"' : ''}>
       <td style="color:#c0bce0">${i+1}</td>
-      <td><span class="addr-short" style="cursor:pointer" onclick="copyAddr('${ben.fullAddr||ben.recipient}')" title="Click to copy full address">${walletDisplayName(ben.fullAddr||ben.recipient, ben.recipient)} ⧉</span> <button onclick="promptRenameWallet('${ben.fullAddr||ben.recipient}','${ben.recipient}')" title="Rename wallet" style="background:none;border:none;color:#50406a;font-size:10px;cursor:pointer;padding:1px 3px;font-family:'Share Tech Mono',monospace" onmouseover="this.style.color='#a080ff'" onmouseout="this.style.color='#50406a'">✎</button></td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px">
+          ${(()=>{ const _nick=getWalletNickname(ben.fullAddr||ben.recipient); return _nick ? `<span style="font-family:'Syne',sans-serif;font-weight:700;font-size:12px;color:#e0d8ff">${_nick}</span><span style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#6644aa">${ben.recipient}</span>` : `<span style="font-family:'Share Tech Mono',monospace;font-size:12px;color:#c0bce0">${ben.recipient}</span>`; })()}
+          <button onclick="copyAddr('${ben.fullAddr||ben.recipient}')" title="Copy address" style="background:none;border:none;color:#50406a;font-size:11px;cursor:pointer;padding:1px 3px" onmouseover="this.style.color='#a080ff'" onmouseout="this.style.color='#50406a'">⧉</button>
+          <button onclick="promptRenameWallet('${ben.fullAddr||ben.recipient}','${ben.recipient}')" title="Rename" style="background:none;border:none;color:#50406a;font-size:11px;cursor:pointer;padding:1px 3px" onmouseover="this.style.color='#c0a0ff'" onmouseout="this.style.color='#50406a'">✎</button>
+        </div>
+      </td>
       <td>${ben.amount.toLocaleString()}</td>
-      <td style="color:${tokenColor(ben.token)};font-size:12px">${(typeof MINT_TO_SYMBOL!=='undefined'&&MINT_TO_SYMBOL[ben.token])||ben.token}${over ? ' <span style="color:#ff3d5a">⚠️</span>' : ''}</td>
+      <td style="color:${tokenColor(ben.token)};font-size:12px">${resolveBeneToken(ben.token)}${over ? ' <span style="color:#ff3d5a">⚠️</span>' : ''}</td>
       <td><span class="tag tag-transfer">TRANSFER</span></td>
       <td><span class="tag ${ben.executed?'tag-done':'tag-ready'}">${ben.executed?'PAID':'READY'}</span></td>
       <td><button class="icon-btn" onclick="dbRemoveBeneficiary(${realIdx})" title="Remove">✕</button></td>
@@ -5705,7 +5730,7 @@ function renderBeneficiaries() {
         <td style="color:rgba(255,61,90,0.4)">—</td>
         <td style="color:#c0bce0">BURN (no recipient)</td>
         <td>${ben.amount.toLocaleString()}</td>
-        <td style="color:#ff6688;font-size:12px">${(typeof MINT_TO_SYMBOL!=='undefined'&&MINT_TO_SYMBOL[ben.token])||ben.token}</td>
+        <td style="color:#ff6688;font-size:12px">${resolveBeneToken(ben.token)}</td>
         <td><span class="tag tag-burn">BURN</span></td>
         <td><span class="tag ${ben.executed?'tag-done':'tag-ready'}">${ben.executed?'DONE':'READY'}</span></td>
         <td><button class="icon-btn" onclick="dbRemoveBeneficiary(${realIdx})" title="Remove">✕</button></td>
@@ -6033,7 +6058,7 @@ async function dbAddBeneficiary(action) {
     if (!isBurn) document.getElementById('newRecipient').value = '';
     const mergeNote = mergedFromWhole ? ' · whole-vault assignment replaced' : '';
     const msg = isBurn ? '🔥 Burn instruction added' : ('✅ Beneficiary added' + mergeNote);
-    addActivityRow(isBurn ? '🔥 Burn instruction added [demo]' : '📋 Beneficiary added [demo]', randomTx());
+    addActivityRow(isBurn ? ('🔥 Assigned ' + amount.toLocaleString() + ' ' + t.symbol + ' to be burned [demo]') : ('🎯 Beneficiary added · ' + short + ' [demo]'), randomTx());
     showNotif(msg, 'green');
     saveSession();
     return;
@@ -6109,7 +6134,7 @@ async function dbAddBeneficiary(action) {
     renderVaultHoldings();
     document.getElementById(amountInput).value = '';
     if (!isBurn) document.getElementById('newRecipient').value = '';
-    addActivityRow(isBurn ? '🔥 Burn instruction' : ('🎯 Beneficiary added · ' + short), shortSig);
+    addActivityRow(isBurn ? ('🔥 Assigned ' + amount.toLocaleString() + ' ' + t.symbol + ' to be burned') : ('🎯 Beneficiary added · ' + short), shortSig);
     setTimeout(() => fetchOnChainHistory().catch(()=>{}), 3000); // re-label from chain
     const mergeNote2 = mergedFromWhole ? ' · whole-vault assignment replaced' : '';
     showNotif(isBurn ? '🔥 Burn instruction confirmed!' : ('✅ Beneficiary added on-chain!' + mergeNote2), 'green');
@@ -6309,7 +6334,7 @@ async function dbSaveWholeVaultPlan(wvAction, _directRecipient) {
   if (!ghostState.provider || ghostState.walletName?.includes('demo')) {
     _applyWholeVaultLocally(share);
     showNotif(isBurnAll ? '🔥 Whole vault burn set [demo]' : 'Whole vault recipient set [demo]', 'green');
-    addActivityRow((isBurnAll ? '🔥 Whole vault burn' : 'Whole vault -> ' + share.addr) + ' [demo]', '');
+    addActivityRow(isBurnAll ? '🔥 Assigned whole vault to be burned [demo]' : ('👻 Whole vault → ' + share.addr + ' [demo]'), '');
     return true;
   }
 
@@ -6351,7 +6376,7 @@ async function dbSaveWholeVaultPlan(wvAction, _directRecipient) {
     ghostState.ghost.wholeVaultRecipient = isBurnAll ? null : recipientPk;
     ghostState.ghost.wholeVaultAction = _wvAct;
     _applyWholeVaultLocally(share);
-    addActivityRow(isBurnAll ? '🔥 Whole vault burn set on-chain' : ('Whole vault recipient → ' + share.addr), sig.slice(0,4)+'...'+sig.slice(-4));
+    addActivityRow(isBurnAll ? '🔥 Assigned whole vault to be burned' : ('👻 Whole vault → ' + share.addr), sig.slice(0,4)+'...'+sig.slice(-4));
     showNotif(isBurnAll ? '🔥 Whole vault burn set on-chain!' : 'Whole vault recipient set on-chain!', 'green');
     // Re-fetch after short delay to confirm chain state matches local optimistic update
     setTimeout(() => fetchGhostAccount().catch(() => {}), 2000);
