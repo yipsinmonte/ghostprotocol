@@ -5704,33 +5704,64 @@ function renderBeneficiaries() {
   let rows = '';
   transfers.forEach((ben, i) => {
     const realIdx = all.indexOf(ben);
-    const vt = ghostState.vaultTokens.find(v => v.symbol === ben.token);
+    const vt = ghostState.vaultTokens.find(v => v.symbol === ben.token || v.mint === ben.token);
     const over = vt && ben.amount > vt.balance;
-    rows += `<tr${over ? ' style="background:rgba(255,61,90,0.05)"' : ''}>
-      <td style="color:#c0bce0">${i+1}</td>
-      <td>
-        <div style="display:flex;align-items:center;gap:6px">
-          ${(()=>{ const _nick=getWalletNickname(ben.fullAddr||ben.recipient); return _nick ? `<span style="font-family:'Syne',sans-serif;font-weight:700;font-size:12px;color:#e0d8ff">${_nick}</span><span style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#6644aa">${ben.recipient}</span>` : `<span style="font-family:'Share Tech Mono',monospace;font-size:12px;color:#c0bce0">${ben.recipient}</span>`; })()}
-          <button onclick="copyAddr('${ben.fullAddr||ben.recipient}')" title="Copy address" style="background:none;border:none;color:#50406a;font-size:11px;cursor:pointer;padding:1px 3px" onmouseover="this.style.color='#a080ff'" onmouseout="this.style.color='#50406a'">⧉</button>
-          <button onclick="promptRenameWallet('${ben.fullAddr||ben.recipient}','${ben.recipient}')" title="Rename" style="background:none;border:none;color:#50406a;font-size:11px;cursor:pointer;padding:1px 3px" onmouseover="this.style.color='#c0a0ff'" onmouseout="this.style.color='#50406a'">✎</button>
+    const _resolvedSym = resolveBeneToken(ben.token);
+    const _nick = getWalletNickname(ben.fullAddr||ben.recipient);
+    const _tcol = tokenColor(ben.token);
+    rows += `<tr style="border-bottom:1px solid rgba(102,51,255,0.08);${over?'background:rgba(255,61,90,0.04)':''}">
+      <td style="color:#443366;font-family:'Share Tech Mono',monospace;font-size:11px;width:28px">${i+1}</td>
+      <td style="padding:14px 10px">
+        <div style="display:flex;flex-direction:column;gap:3px">
+          ${_nick
+            ? `<span style="font-family:'Syne',sans-serif;font-weight:700;font-size:13px;color:#e8e0ff;letter-spacing:0.01em">${_nick}</span>
+               <div style="display:flex;align-items:center;gap:5px">
+                 <span style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#5544aa">${ben.recipient}</span>
+                 <button onclick="copyAddr('${ben.fullAddr||ben.recipient}')" title="Copy" style="background:none;border:none;color:#443366;font-size:10px;cursor:pointer;padding:0 2px" onmouseover="this.style.color='#a080ff'" onmouseout="this.style.color='#443366'">⧉</button>
+                 <button onclick="promptRenameWallet('${ben.fullAddr||ben.recipient}','${ben.recipient}')" title="Rename" style="background:none;border:none;color:#443366;font-size:10px;cursor:pointer;padding:0 2px" onmouseover="this.style.color='#c0a0ff'" onmouseout="this.style.color='#443366'">✎</button>
+               </div>`
+            : `<div style="display:flex;align-items:center;gap:5px">
+                 <span style="font-family:'Share Tech Mono',monospace;font-size:12px;color:#c0bce0">${ben.recipient}</span>
+                 <button onclick="copyAddr('${ben.fullAddr||ben.recipient}')" title="Copy" style="background:none;border:none;color:#443366;font-size:10px;cursor:pointer;padding:0 2px" onmouseover="this.style.color='#a080ff'" onmouseout="this.style.color='#443366'">⧉</button>
+                 <button onclick="promptRenameWallet('${ben.fullAddr||ben.recipient}','${ben.recipient}')" title="Rename" style="background:none;border:none;color:#443366;font-size:10px;cursor:pointer;padding:0 2px" onmouseover="this.style.color='#c0a0ff'" onmouseout="this.style.color='#443366'">✎</button>
+               </div>`
+          }
         </div>
       </td>
-      <td>${ben.amount.toLocaleString()}</td>
-      <td style="color:${tokenColor(ben.token)};font-size:12px">${resolveBeneToken(ben.token)}${over ? ' <span style="color:#ff3d5a">⚠️</span>' : ''}</td>
+      <td style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:#f0f0f8">${ben.amount.toLocaleString()}</td>
+      <td>
+        <span style="font-family:'Share Tech Mono',monospace;font-size:12px;font-weight:700;color:${_tcol};letter-spacing:0.05em;text-shadow:0 0 8px ${_tcol}66">${_resolvedSym}</span>
+        ${over ? '<span style="color:#ff3d5a;font-size:11px;margin-left:4px">⚠ over</span>' : ''}
+      </td>
       <td><span class="tag tag-transfer">TRANSFER</span></td>
       <td><span class="tag ${ben.executed?'tag-done':'tag-ready'}">${ben.executed?'PAID':'READY'}</span></td>
       <td><button class="icon-btn" onclick="dbRemoveBeneficiary(${realIdx})" title="Remove">✕</button></td>
     </tr>`;
   });
   if (burns.length > 0) {
-    rows += `<tr><td colspan="7" style="padding:8px 12px;font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(255,61,90,0.5);letter-spacing:0.2em;text-transform:uppercase;border-top:1px solid rgba(255,61,90,0.15)">🔥 Burn Instructions</td></tr>`;
+    rows += `<tr><td colspan="7" style="padding:12px 16px 8px;background:rgba(255,61,90,0.04);border-top:1px solid rgba(255,61,90,0.2);border-bottom:1px solid rgba(255,61,90,0.1)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:16px;filter:drop-shadow(0 0 6px rgba(255,80,80,0.8))">🔥</span>
+        <span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:rgba(255,100,100,0.8);letter-spacing:0.2em;text-transform:uppercase">Burn Instructions</span>
+        <span style="font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(255,61,90,0.4)">· permanently destroyed on execution</span>
+      </div>
+    </td></tr>`;
     burns.forEach(ben => {
       const realIdx = all.indexOf(ben);
-      rows += `<tr>
-        <td style="color:rgba(255,61,90,0.4)">—</td>
-        <td style="color:#c0bce0">BURN (no recipient)</td>
-        <td>${ben.amount.toLocaleString()}</td>
-        <td style="color:#ff6688;font-size:12px">${resolveBeneToken(ben.token)}</td>
+      const _resolvedBurnSym = resolveBeneToken(ben.token);
+      const _bcol = tokenColor(ben.token) || '#ff6688';
+      rows += `<tr style="background:rgba(255,40,40,0.03);border-bottom:1px solid rgba(255,61,90,0.07)">
+        <td style="width:28px"><span style="font-size:14px;filter:drop-shadow(0 0 4px rgba(255,80,80,0.6))">🔥</span></td>
+        <td style="padding:14px 10px">
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:rgba(255,100,100,0.5);letter-spacing:0.1em;text-transform:uppercase">no recipient</span>
+            <span style="font-family:'Syne',sans-serif;font-size:12px;color:rgba(255,80,80,0.7)">Burned on execution</span>
+          </div>
+        </td>
+        <td style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:#ff6688">${ben.amount.toLocaleString()}</td>
+        <td>
+          <span style="font-family:'Share Tech Mono',monospace;font-size:12px;font-weight:700;color:#ff6688;letter-spacing:0.05em;text-shadow:0 0 8px rgba(255,80,80,0.5)">${_resolvedBurnSym}</span>
+        </td>
         <td><span class="tag tag-burn">BURN</span></td>
         <td><span class="tag ${ben.executed?'tag-done':'tag-ready'}">${ben.executed?'DONE':'READY'}</span></td>
         <td><button class="icon-btn" onclick="dbRemoveBeneficiary(${realIdx})" title="Remove">✕</button></td>
@@ -5739,23 +5770,28 @@ function renderBeneficiaries() {
   }
   // Whole-vault assignment row
   if (wholeShares.length > 0) {
-    rows += `<tr><td colspan="7" style="padding:8px 12px;font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(160,128,255,0.6);letter-spacing:0.2em;text-transform:uppercase;border-top:1px solid rgba(160,128,255,0.15)">Whole Vault Assignment</td></tr>`;
+    rows += `<tr><td colspan="7" style="padding:12px 16px 8px;background:rgba(102,51,255,0.04);border-top:1px solid rgba(160,128,255,0.2);border-bottom:1px solid rgba(160,128,255,0.08)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:16px">👻</span>
+        <span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:rgba(160,128,255,0.8);letter-spacing:0.2em;text-transform:uppercase">Whole Vault Assignment</span>
+      </div>
+    </td></tr>`;
     wholeShares.forEach(ben => {
       const realIdx = all.indexOf(ben);
       const isBurnAll = ben.wholeVaultAction === 1;
       const rowBg = isBurnAll ? 'rgba(255,61,90,0.04)' : 'rgba(102,51,255,0.03)';
       const icon = isBurnAll ? '🔥' : '👻';
       const recipCell = isBurnAll
-        ? '<span style="color:rgba(255,61,90,0.7)">BURN ALL (no recipient)</span>'
-        : `<span class="addr-short" style="cursor:pointer" onclick="copyAddr('${ben.fullAddr||ben.recipient}')" title="Click to copy">${ben.recipient} ⧉</span>`;
+        ? `<div style="display:flex;flex-direction:column;gap:2px"><span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:rgba(255,100,100,0.5);letter-spacing:0.1em;text-transform:uppercase">no recipient</span><span style="font-family:'Syne',sans-serif;font-size:12px;color:rgba(255,80,80,0.7)">Entire vault burned</span></div>`
+        : `<div style="display:flex;align-items:center;gap:5px"><span style="font-family:'Share Tech Mono',monospace;font-size:12px;color:#c0bce0;cursor:pointer" onclick="copyAddr('${ben.fullAddr||ben.recipient}')">${ben.recipient}</span><button onclick="copyAddr('${ben.fullAddr||ben.recipient}')" style="background:none;border:none;color:#443366;font-size:10px;cursor:pointer;padding:0 2px" onmouseover="this.style.color='#a080ff'" onmouseout="this.style.color='#443366'">⧉</button></div>`;
       const typeTag = isBurnAll
         ? '<span class="tag tag-burn">BURN ALL</span>'
         : '<span class="tag" style="background:rgba(160,128,255,0.1);color:#c0a0ff;border-color:rgba(160,128,255,0.3)">VAULT</span>';
-      rows += `<tr style="background:${rowBg}">
-        <td style="color:${isBurnAll?'rgba(255,61,90,0.5)':'#a080ff'}">${icon}</td>
-        <td>${recipCell}</td>
-        <td style="color:#c0a0ff">100%</td>
-        <td style="color:${isBurnAll?'#ff6688':'#c0a0ff'};font-size:12px">All tokens</td>
+      rows += `<tr style="background:${rowBg};border-bottom:1px solid rgba(102,51,255,0.06)">
+        <td style="width:28px"><span style="font-size:14px">${icon}</span></td>
+        <td style="padding:14px 10px">${recipCell}</td>
+        <td style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:#c0a0ff">100%</td>
+        <td><span style="font-family:'Share Tech Mono',monospace;font-size:12px;color:${isBurnAll?'#ff6688':'#c0a0ff'}">All tokens</span></td>
         <td>${typeTag}</td>
         <td><span class="tag tag-done">READY</span></td>
         <td><button class="icon-btn" onclick="dbRemoveBeneficiary(${realIdx})" title="Remove">✕</button></td>
