@@ -4051,53 +4051,28 @@ async function checkWalletAbandoned(pubkey, ghostPdaStr) {
     if (localStorage.getItem('ghostAbandoned_' + pubkey)) return true;
   } catch(e) {}
 
-  // On-chain: fetch each tx individually via getTransaction with base64 encoding.
-  // getParsedTransactions is not supported on all Helius plans — this method works universally.
+  // On-chain check: if the ghost PDA has ANY transaction history but no live account,
+  // the wallet previously had a ghost (and abandoned/was executed). Block re-summon.
+  // This works even when Helius prunes old tx data — the sig index persists.
+  // Fresh wallets will have 0 sigs on their ghost PDA.
   try {
-    console.log('[Ghost] Checking abandon history for PDA:', ghostPdaStr);
+    console.log('[Ghost] Checking ghost PDA history for:', ghostPdaStr);
     const sigsRes = await fetch(RPC_URL, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 'abandonCheck', method: 'getSignaturesForAddress',
-        params: [ghostPdaStr, { limit: 50, commitment: 'confirmed' }] })
+        params: [ghostPdaStr, { limit: 1, commitment: 'confirmed' }] })
     });
     const sigsData = await sigsRes.json();
-    const sigs = (sigsData.result || []).filter(s => !s.err).map(s => s.signature);
-    console.log('[Ghost] Abandon check: found', sigs.length, 'sigs on ghost PDA');
-    if (sigs.length === 0) return false;
-
-    // Send all requests in parallel — base64 getTransaction works on all Helius plans
-    const txResults = await Promise.all(sigs.slice(0, 50).map(sig =>
-      fetch(RPC_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: sig, method: 'getTransaction',
-          params: [sig, { encoding: 'base64', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }] }) })
-      .then(r => r.json()).catch(() => null)
-    ));
-
-    let _txOk = 0, _txNull = 0;
-    for (const res of txResults) {
-      if (!res?.result) { _txNull++; continue; }
-      _txOk++;
-      const msgData = res.result.transaction?.message;
-      if (!msgData) continue;
-      const msgB64 = Array.isArray(msgData) ? msgData[0] : (typeof msgData === 'string' ? msgData : null);
-      if (!msgB64) { console.log('[Ghost] msgData format unexpected:', typeof msgData, msgData); continue; }
-      try {
-        const msgBytes = Uint8Array.from(atob(msgB64), c => c.charCodeAt(0));
-        const discBytes = new Uint8Array(8);
-        for (let i = 0; i < 8; i++) discBytes[i] = parseInt(ABANDON_DISC_HEX.slice(i*2, i*2+2), 16);
-        // Log first tx bytes and disc target for debugging
-        if (_txOk === 1) console.log('[Ghost] First tx msgBytes length:', msgBytes.length, 'first16:', Array.from(msgBytes.slice(0,16)).map(b=>b.toString(16).padStart(2,'0')).join(' '), '| looking for disc:', ABANDON_DISC_HEX);
-        outer: for (let i = 0; i < msgBytes.length - 8; i++) {
-          for (let j = 0; j < 8; j++) { if (msgBytes[i+j] !== discBytes[j]) continue outer; }
-          try { localStorage.setItem('ghostAbandoned_' + pubkey, '1'); } catch(e) {}
-          console.log('[Ghost] ✅ Abandon discriminator found at offset', i, 'for', pubkey);
-          return true;
-        }
-      } catch(e) { console.warn('[Ghost] tx decode error:', e); }
+    const sigs = sigsData.result || [];
+    console.log('[Ghost] Ghost PDA sig count (capped at 1):', sigs.length);
+    if (sigs.length > 0) {
+      // PDA has history but no live account — wallet previously had a ghost
+      try { localStorage.setItem('ghostAbandoned_' + pubkey, '1'); } catch(e) {}
+      console.log('[Ghost] ✅ Ghost PDA has prior history — blocking re-summon for', pubkey);
+      return true;
     }
-    console.log('[Ghost] Scan complete — txOk:', _txOk, 'txNull:', _txNull, 'no abandon disc found');
   } catch(e) { console.warn('[Ghost] Abandon on-chain check failed:', e); }
-  console.log('[Ghost] No abandon tx found for', pubkey);
+  console.log('[Ghost] Ghost PDA is fresh — allowing summon for', pubkey);
   return false;
 }
 
