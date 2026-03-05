@@ -4560,7 +4560,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // If page was refreshed while on landing, don't auto-redirect to dashboard
     const _wasInDashboard = ghostState._wasInDashboard === true;
     if (_wasInDashboard) {
-      openDashboard();
+      // Show dashboard panel directly — do NOT call openDashboard() recursively
+      // as it would spawn another fetchGhostAccount that races and overwrites status
+      const dash = document.getElementById('dashboard');
+      const landing = document.getElementById('landing');
+      if (dash) dash.style.display = 'flex';
+      if (landing) landing.style.display = 'none';
       dbShowPage('overview', document.getElementById('nav-overview'));
       loadWalletTokens();
     }
