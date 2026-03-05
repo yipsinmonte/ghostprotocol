@@ -9713,17 +9713,9 @@ async function dbWithdrawAsset(mintKey) {
     const { blockhash } = await connection.getLatestBlockhash();
     const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
 
-    let manualKp = null;
-    let receiveAcct = ownerAta;
     if (!ownerAtaInfo) {
-      // ATA program fails simulation on Helius when account doesn't exist yet.
-      // Use manual keypair account creation (same as deposit vault-side) — bypasses ATA entirely.
-      console.log('[Ghost] Owner ATA missing — using manual account creation for', withdrawMintPk.toBase58());
-      const manual = await buildManualTokenAccountIxs(walletPk, withdrawMintPk, walletPk, rawTokenProgPk, connection);
-      manualKp = manual.kp;
-      receiveAcct = manual.kp.publicKey;
-      tx.add(manual.createIx);
-      tx.add(manual.initIx);
+      console.log('[Ghost] Owner ATA missing — prepending createATA ix for', withdrawMintPk.toBase58());
+      tx.add(createATAInstruction(walletPk, ownerAta, walletPk, withdrawMintPk, rawTokenProgPk));
     }
 
     tx.add(new TransactionInstruction({ programId,
@@ -9732,17 +9724,18 @@ async function dbWithdrawAsset(mintKey) {
         { pubkey: vaultPda,       isSigner: false, isWritable: false },
         { pubkey: walletPk,       isSigner: true,  isWritable: true  },
         { pubkey: withdrawMintPk, isSigner: false, isWritable: false },
-        { pubkey: receiveAcct,    isSigner: false, isWritable: true  },
+        { pubkey: ownerAta,       isSigner: false, isWritable: true  },
         { pubkey: vaultAta,       isSigner: false, isWritable: true  },
         { pubkey: rawTokenProgPk, isSigner: false, isWritable: false },
       ], data }));
 
-    console.log('[Ghost] single withdraw — receiveAcct:', receiveAcct.toBase58(), 'vaultAta:', vaultAta.toBase58(), 'manual:', !!manualKp);
-    let signed = await ghostState.provider.signTransaction(tx);
-    if (manualKp) signed.partialSign(manualKp);
+    console.log('[Ghost] single withdraw — ownerAta:', ownerAta.toBase58(), 'vaultAta:', vaultAta.toBase58(), 'ataExists:', !!ownerAtaInfo);
+    const signed = await ghostState.provider.signTransaction(tx);
     let sig;
     try {
-      sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: !!manualKp, preflightCommitment: 'confirmed' });
+      // skipPreflight always — Helius simulation rejects ATA creation ix when account
+      // doesn't exist yet (same pattern as all other keypair/create txs in codebase)
+      sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: true, preflightCommitment: 'confirmed' });
     } catch(simErr) {
       let logs = []; try { logs = await simErr.getLogs(connection); } catch(_) {}
       if (!logs?.length) { try { const sim = await connection.simulateTransaction(tx); logs = sim.value.logs||[]; } catch(_) {} }
