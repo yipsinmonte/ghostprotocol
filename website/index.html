@@ -4073,29 +4073,29 @@ async function checkWalletAbandoned(pubkey, ghostPdaStr) {
       .then(r => r.json()).catch(() => null)
     ));
 
+    let _txOk = 0, _txNull = 0;
     for (const res of txResults) {
-      if (!res?.result) continue;
-      // message is base64 encoded — decode and scan for abandon discriminator bytes
+      if (!res?.result) { _txNull++; continue; }
+      _txOk++;
       const msgData = res.result.transaction?.message;
       if (!msgData) continue;
-      // In base64 encoding, message is an array: [base64string, encoding]
-      const msgB64 = Array.isArray(msgData) ? msgData[0] : null;
-      if (!msgB64) continue;
+      const msgB64 = Array.isArray(msgData) ? msgData[0] : (typeof msgData === 'string' ? msgData : null);
+      if (!msgB64) { console.log('[Ghost] msgData format unexpected:', typeof msgData, msgData); continue; }
       try {
         const msgBytes = Uint8Array.from(atob(msgB64), c => c.charCodeAt(0));
-        // Convert target disc hex to bytes for comparison
         const discBytes = new Uint8Array(8);
         for (let i = 0; i < 8; i++) discBytes[i] = parseInt(ABANDON_DISC_HEX.slice(i*2, i*2+2), 16);
-        // Scan message bytes for the discriminator sequence
+        // Log first tx bytes and disc target for debugging
+        if (_txOk === 1) console.log('[Ghost] First tx msgBytes length:', msgBytes.length, 'first16:', Array.from(msgBytes.slice(0,16)).map(b=>b.toString(16).padStart(2,'0')).join(' '), '| looking for disc:', ABANDON_DISC_HEX);
         outer: for (let i = 0; i < msgBytes.length - 8; i++) {
           for (let j = 0; j < 8; j++) { if (msgBytes[i+j] !== discBytes[j]) continue outer; }
-          // Found discriminator in this tx
           try { localStorage.setItem('ghostAbandoned_' + pubkey, '1'); } catch(e) {}
-          console.log('[Ghost] ✅ Abandon discriminator found in tx for', pubkey);
+          console.log('[Ghost] ✅ Abandon discriminator found at offset', i, 'for', pubkey);
           return true;
         }
       } catch(e) { console.warn('[Ghost] tx decode error:', e); }
     }
+    console.log('[Ghost] Scan complete — txOk:', _txOk, 'txNull:', _txNull, 'no abandon disc found');
   } catch(e) { console.warn('[Ghost] Abandon on-chain check failed:', e); }
   console.log('[Ghost] No abandon tx found for', pubkey);
   return false;
