@@ -5242,12 +5242,12 @@ async function sendPing() {
 
   orb.classList.add('beat');
 
-  // Determine source element
-  const _onHbPage = document.getElementById('db-page-heartbeat')?.style.display !== 'none';
+  // Determine center point — use getBoundingClientRect, fallback to viewport center
+  const _onHbPage = document.getElementById('db-page-heartbeat')?.classList.contains('active');
   const _srcEl = _onHbPage ? (document.getElementById('hbSendBtn') || orb) : orb;
   const _r = _srcEl.getBoundingClientRect();
-  const _cx = _r.left + _r.width / 2;
-  const _cy = _r.top + _r.height / 2;
+  const _cx = (_r.width > 0) ? (_r.left + _r.width / 2)  : (window.innerWidth  / 2);
+  const _cy = (_r.height > 0) ? (_r.top  + _r.height / 2) : (window.innerHeight / 2);
 
   // Recreate rings so animation always restarts from correct position
   ripple.innerHTML = '';
