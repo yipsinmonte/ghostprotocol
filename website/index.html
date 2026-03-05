@@ -7524,19 +7524,22 @@ async function loadWalletTokens() {
             });
           }
           // Fetch native SOL (lamport) balance of each vault PDA and inject as 'native' entry
-          for (const pdaAddr of pdaAddrs) {
-            try {
-              const _solR = await fetch(RPC_URL, {method:'POST',headers:{'Content-Type':'application/json'},
-                body:JSON.stringify({jsonrpc:'2.0',id:'vsolbal',method:'getBalance',params:[pdaAddr]})});
-              const _solD = await _solR.json();
-              const _lamps = _solD.result?.value || 0;
-              const _solBal = Math.max(0, _lamps / 1e9 - 0.01); // subtract ~0.01 SOL rent reserve
-              if (_solBal > 0) {
-                const _exSol = freshVault.find(v => v.mint === 'native');
-                if (_exSol) { _exSol.balance = Math.max(_exSol.balance, _solBal); }
-                else { freshVault.push({symbol:'SOL',mint:'native',balance:_solBal,decimals:9,logoUrl:'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',name:'Solana',_unknownMeta:false}); }
-              }
-            } catch(_) {}
+          // Skip if SOL was recently withdrawn — suppresses reappearing until chain closes wSOL account
+          if (!ghostState._withdrawnMints.has('native')) {
+            for (const pdaAddr of pdaAddrs) {
+              try {
+                const _solR = await fetch(RPC_URL, {method:'POST',headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify({jsonrpc:'2.0',id:'vsolbal',method:'getBalance',params:[pdaAddr]})});
+                const _solD = await _solR.json();
+                const _lamps = _solD.result?.value || 0;
+                const _solBal = Math.max(0, _lamps / 1e9 - 0.01); // subtract ~0.01 SOL rent reserve
+                if (_solBal > 0) {
+                  const _exSol = freshVault.find(v => v.mint === 'native');
+                  if (_exSol) { _exSol.balance = Math.max(_exSol.balance, _solBal); }
+                  else { freshVault.push({symbol:'SOL',mint:'native',balance:_solBal,decimals:9,logoUrl:'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',name:'Solana',_unknownMeta:false}); }
+                }
+              } catch(_) {}
+            }
           }
           // Only merge+prune if we actually got parseable on-chain data.
           // If freshVault is empty but vaultAccts has entries, parsing failed (e.g. Token-2022
@@ -8700,8 +8703,16 @@ for (const t of solTokens) {
 
 if (successCount > 0) {
   ghostState.selectedTokens.deposit = null;
+  // Zero out any successfully deposited tokens in walletTokens that may still show balance
+  // (belt-and-suspenders — the batch loops already do this but SOL phase may have been skipped)
+  for (const t of tokens) {
+    if (t.balance > 0) {
+      // Only zero if we successfully deposited it (check vaultTokens got it)
+      const inVault = ghostState.vaultTokens.find(v => v.mint === t.mint || (t.mint === 'native' && v.mint === 'native'));
+      if (inVault) t.balance = 0;
+    }
+  }
   // Rebuild deposit dropdown immediately from current in-memory wallet balances
-  // (tokens that were deposited already had their balance zeroed in the loop above)
   const depositPoolImmediate = ghostState.walletTokens.filter(tok => tok.balance > 0 && !isProtocolMint(tok.mint));
   buildPickerDropdown('deposit', depositPoolImmediate);
   if (depositPoolImmediate.length > 0) selectToken('deposit', depositPoolImmediate[0].mint);
@@ -8709,11 +8720,9 @@ if (successCount > 0) {
   _refreshBenePickers();
   renderVaultHoldings(); renderVaultOverview();
   showNotif('✅ Deposited ' + successCount + '/' + tokens.length + ' asset(s) to vault!', 'green');
-  // Then reload from chain to get confirmed balances
+  // Reload from chain to confirm vault balances — but don't rebuild deposit dropdown
+  // from chain data yet (RPC may not reflect deposit, would re-show deposited tokens)
   loadWalletTokens().then(() => {
-    const depositPool = ghostState.walletTokens.filter(tok => tok.balance > 0 && !isProtocolMint(tok.mint));
-    buildPickerDropdown('deposit', depositPool);
-    if (depositPool.length > 0 && !ghostState.selectedTokens.deposit) selectToken('deposit', depositPool[0].mint);
     _refreshBenePickers();
     renderVaultHoldings(); renderVaultOverview(); renderBeneficiaries();
   }).catch(() => {});
