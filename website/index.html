@@ -8745,6 +8745,20 @@ showNotif('Batch failed [' + syms + ']: ' + (err.message || err), 'error');
 }
 for (const vt of solTokens) {
 try {
+// Re-fetch live native SOL balance — SPL batch txs above consumed fees,
+// so vt.balance is stale. If wallet can't cover rent + fee, skip gracefully.
+let liveNativeLamports = 0;
+try {
+  const _br = await fetch(RPC_URL, { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({jsonrpc:'2.0',id:'wsolbal',method:'getBalance',params:[ghostState.publicKey]}) });
+  liveNativeLamports = (await _br.json()).result?.value || 0;
+} catch(_) {}
+const wsolRent = await connection.getMinimumBalanceForRentExemption(165);
+const feeBuffer = 10000; // ~0.00001 SOL tx fee
+if (liveNativeLamports < wsolRent + feeBuffer) {
+  showNotif('⚠️ Not enough SOL left for fees after SPL withdrawals — SOL vault balance unchanged', 'error');
+  continue;
+}
 const amount = vt.balance;
 // Find vault wSOL account
 let vaultAta;
@@ -8754,33 +8768,28 @@ const amountRaw = BigInt(Math.round(amount * 1e9));
 const buf = new ArrayBuffer(8); new DataView(buf).setBigUint64(0, amountRaw, true);
 const data = new Uint8Array(16); data.set(disc, 0); data.set(new Uint8Array(buf), 8);
 
-// Use wallet's derived wSOL ATA as recipient — avoids random keypair createAccount
-// which Phantom flags as "malicious" (sees new account + SOL leaving wallet).
-// If ATA doesn't exist, create it with createATAInstruction (standard ATA create,
-// which Phantom recognises as a normal "create token account").
-const walletWsolAta = await findATAWithProg(walletPk, WSOL_MINT_PK, TOKEN_PROG_PK);
-const walletWsolAtaInfo = await connection.getAccountInfo(walletWsolAta);
+// Use fresh keypair wSOL account — reliable pattern, Phantom warning is cosmetic only.
+// ATA-based approach had edge cases when account is newly created + used in same tx.
+const wsolKp = Keypair.generate(); const wsolAcct = wsolKp.publicKey;
+const space = 165; const rent = await connection.getMinimumBalanceForRentExemption(space);
 const { blockhash } = await connection.getLatestBlockhash();
 const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
-// Create wallet wSOL ATA if it doesn't exist yet
-if (!walletWsolAtaInfo) {
-  tx.add(createATAInstruction(walletPk, walletWsolAta, walletPk, WSOL_MINT_PK, TOKEN_PROG_PK));
-}
-// Withdraw from vault into wallet wSOL ATA
+tx.add(SystemProgram.createAccount({ fromPubkey: walletPk, newAccountPubkey: wsolAcct, lamports: rent, space, programId: TOKEN_PROG_PK }));
+const initData = new Uint8Array(33); initData[0] = 18; initData.set(walletPk.toBytes(), 1);
+tx.add(new TransactionInstruction({ programId: TOKEN_PROG_PK, keys: [{ pubkey: wsolAcct, isSigner: false, isWritable: true }, { pubkey: WSOL_MINT_PK, isSigner: false, isWritable: false }], data: initData }));
 tx.add(new TransactionInstruction({ programId, keys: [
-{ pubkey: ghostPda,      isSigner: false, isWritable: false },
-{ pubkey: vaultPda,      isSigner: false, isWritable: false },
-{ pubkey: walletPk,      isSigner: true,  isWritable: true  },
-{ pubkey: WSOL_MINT_PK,  isSigner: false, isWritable: false },
-{ pubkey: walletWsolAta, isSigner: false, isWritable: true  },
-{ pubkey: vaultAta,      isSigner: false, isWritable: true  },
-{ pubkey: TOKEN_PROG_PK, isSigner: false, isWritable: false },
+{ pubkey: ghostPda,     isSigner: false, isWritable: false },
+{ pubkey: vaultPda,     isSigner: false, isWritable: false },
+{ pubkey: walletPk,     isSigner: true,  isWritable: true  },
+{ pubkey: WSOL_MINT_PK, isSigner: false, isWritable: false },
+{ pubkey: wsolAcct,     isSigner: false, isWritable: true  },
+{ pubkey: vaultAta,     isSigner: false, isWritable: true  },
+{ pubkey: TOKEN_PROG_PK,isSigner: false, isWritable: false },
 ], data }));
-// Unwrap wSOL → native SOL immediately after
-tx.add(buildUnwrapIx(walletPk, walletWsolAta));
+tx.add(buildUnwrapIx(walletPk, wsolAcct));
 showNotif('Sign to withdraw SOL...', '');
 const signed = await ghostState.provider.signTransaction(tx);
-// No keypair partial sign needed — ATA is deterministic, no signer required
+signed.partialSign(wsolKp);
 let sig;
 try { sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' }); }
 catch(simErr) {
@@ -9408,35 +9417,48 @@ async function dbWithdrawAsset(vaultIdx) {
     const buf = new ArrayBuffer(8); new DataView(buf).setBigUint64(0, amountRaw, true);
     const data = new Uint8Array(16); data.set(disc, 0); data.set(new Uint8Array(buf), 8);
 
-    // ── SOL: withdraw to wallet's derived wSOL ATA, then unwrap to native ──
-    // Using derived ATA (not random keypair) avoids Phantom "malicious" warning —
-    // Phantom recognises createAssociatedTokenAccount as safe but flags createAccount.
+    // ── SOL: withdraw via fresh wSOL keypair account, then unwrap to native ──
+    // Reverted from ATA approach — ATA unwrap has edge cases when account is newly
+    // created in same tx. Keypair pattern is reliable; Phantom warning is cosmetic only.
     if (isSOL) {
-      const walletWsolAta = await findATAWithProg(walletPk, WSOL_MINT_PK, TOKEN_PROG_PK);
-      const walletWsolAtaInfo = await connection.getAccountInfo(walletWsolAta);
+      const wsolKp = Keypair.generate();
+      const wsolAcct = wsolKp.publicKey;
+      const space = 165;
+      const rent = await connection.getMinimumBalanceForRentExemption(space);
 
       const { blockhash } = await connection.getLatestBlockhash();
       const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
-      // 1. Create wallet wSOL ATA if needed (standard ATA create — Phantom shows this safely)
-      if (!walletWsolAtaInfo) {
-        tx.add(createATAInstruction(walletPk, walletWsolAta, walletPk, WSOL_MINT_PK, TOKEN_PROG_PK));
-      }
-      // 2. Withdraw from vault into wallet wSOL ATA
+      // 1. Create fresh wSOL account
+      tx.add(SystemProgram.createAccount({
+        fromPubkey: walletPk, newAccountPubkey: wsolAcct,
+        lamports: rent, space, programId: TOKEN_PROG_PK
+      }));
+      // 2. InitializeAccount3
+      const initData = new Uint8Array(33);
+      initData[0] = 18;
+      initData.set(walletPk.toBytes(), 1);
+      tx.add(new TransactionInstruction({
+        programId: TOKEN_PROG_PK,
+        keys: [{ pubkey: wsolAcct, isSigner: false, isWritable: true },
+               { pubkey: WSOL_MINT_PK, isSigner: false, isWritable: false }],
+        data: initData
+      }));
+      // 3. Withdraw from vault into temp wSOL account
       tx.add(new TransactionInstruction({ programId,
         keys: [
-          { pubkey: ghostPda,      isSigner: false, isWritable: false },
-          { pubkey: vaultPda,      isSigner: false, isWritable: false },
-          { pubkey: walletPk,      isSigner: true,  isWritable: true  },
-          { pubkey: WSOL_MINT_PK,  isSigner: false, isWritable: false },
-          { pubkey: walletWsolAta, isSigner: false, isWritable: true  },
-          { pubkey: vaultAta,      isSigner: false, isWritable: true  },
-          { pubkey: TOKEN_PROG_PK, isSigner: false, isWritable: false },
+          { pubkey: ghostPda,    isSigner: false, isWritable: false },
+          { pubkey: vaultPda,    isSigner: false, isWritable: false },
+          { pubkey: walletPk,    isSigner: true,  isWritable: true  },
+          { pubkey: WSOL_MINT_PK,isSigner: false, isWritable: false },
+          { pubkey: wsolAcct,    isSigner: false, isWritable: true  },
+          { pubkey: vaultAta,    isSigner: false, isWritable: true  },
+          { pubkey: TOKEN_PROG_PK,isSigner: false, isWritable: false },
         ], data }));
-      // 3. Unwrap → native SOL
-      tx.add(buildUnwrapIx(walletPk, walletWsolAta));
+      // 4. Unwrap → native SOL
+      tx.add(buildUnwrapIx(walletPk, wsolAcct));
       showNotif('Withdrawing SOL...', '');
       const signed = await ghostState.provider.signTransaction(tx);
-      // No partialSign needed — ATA is deterministic, no random keypair
+      signed.partialSign(wsolKp);
       let sig;
       try {
         sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' });
