@@ -837,41 +837,113 @@
           </div>
         </div>
 
-        <!-- Executed ghost panel — hidden for non-executed ghosts, replaces normal overview content -->
-        <div id="dbExecutedPanel" style="display:none;margin-bottom:24px">
+        <!-- Executed ghost panel — tombstone-inspired redesign -->
+        <div id="dbExecutedPanel" style="display:none;margin-bottom:24px;position:relative;overflow:hidden">
 
-          <!-- Header: clean, dark, not red-blasted -->
-          <div style="position:relative;padding:32px 24px 24px;text-align:center;background:linear-gradient(180deg,rgba(20,10,35,0.8) 0%,transparent 100%);border-bottom:1px solid rgba(255,255,255,0.04);margin-bottom:20px">
-            <!-- Subtle heartbeat flatline decoration -->
-            <div style="position:absolute;top:18px;left:0;right:0;height:1px;overflow:hidden;opacity:0.15">
-              <svg width="100%" height="24" viewBox="0 0 400 24" preserveAspectRatio="none">
-                <polyline points="0,12 80,12 100,2 115,22 130,12 200,12 220,2 235,22 250,12 400,12" fill="none" stroke="#a080ff" stroke-width="1.5"/>
+          <!-- Fog + vignette layers -->
+          <div style="position:absolute;inset:0;background:radial-gradient(ellipse 80% 60% at 50% 30%,rgba(100,0,0,0.22) 0%,rgba(40,0,20,0.1) 55%,transparent 80%);pointer-events:none;z-index:0"></div>
+          <div style="position:absolute;inset:0;background:radial-gradient(ellipse 100% 100% at 50% 0%,transparent 50%,rgba(0,0,0,0.5) 100%);pointer-events:none;z-index:0"></div>
+          <div style="position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.06) 3px,rgba(0,0,0,0.06) 4px);pointer-events:none;z-index:0;opacity:0.7"></div>
+
+          <!-- Header -->
+          <div style="position:relative;z-index:1;padding:44px 24px 32px;text-align:center;border-bottom:1px solid rgba(200,40,60,0.12)">
+
+            <!-- EKG flatline — draws itself in -->
+            <style>
+              #dbExecEkg { stroke-dasharray:600; stroke-dashoffset:600; }
+              #dbExecutedPanel.exec-visible #dbExecEkg { animation: execEkgDraw 2.4s ease 0.3s forwards; }
+              @keyframes execEkgDraw { to { stroke-dashoffset: 0; } }
+              #dbExecutedPanel.exec-visible .exec-ghost-svg { animation: execGhostFloat 4s ease-in-out infinite, execGhostFlicker 7s ease-in-out infinite; }
+              @keyframes execGhostFloat { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+              @keyframes execGhostFlicker {
+                0%,100%{filter:drop-shadow(0 0 14px rgba(120,50,220,0.8)) drop-shadow(0 0 32px rgba(180,0,50,0.35))}
+                38%{filter:drop-shadow(0 0 24px rgba(160,70,255,0.95)) drop-shadow(0 0 50px rgba(220,0,60,0.55))}
+                40%{filter:drop-shadow(0 0 6px rgba(80,30,160,0.4)) drop-shadow(0 0 12px rgba(120,0,30,0.2))}
+                42%{filter:drop-shadow(0 0 20px rgba(140,60,240,0.85)) drop-shadow(0 0 40px rgba(200,0,50,0.45))}
+              }
+            </style>
+
+            <!-- Ghost SVG — smaller than tombstone page version, same style -->
+            <div style="margin-bottom:16px">
+              <svg class="exec-ghost-svg" width="72" height="86" viewBox="0 0 110 130" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 0 14px rgba(120,50,220,0.8)) drop-shadow(0 0 32px rgba(180,0,50,0.35))">
+                <defs>
+                  <radialGradient id="egb" cx="50%" cy="40%" r="55%">
+                    <stop offset="0%" stop-color="#c8a0ff" stop-opacity="0.95"/>
+                    <stop offset="60%" stop-color="#7030cc" stop-opacity="0.85"/>
+                    <stop offset="100%" stop-color="#3a006a" stop-opacity="0.7"/>
+                  </radialGradient>
+                  <radialGradient id="egg" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stop-color="#dd2060" stop-opacity="0.18"/>
+                    <stop offset="100%" stop-color="#dd2060" stop-opacity="0"/>
+                  </radialGradient>
+                </defs>
+                <ellipse cx="55" cy="62" rx="50" ry="58" fill="url(#egg)"/>
+                <path d="M10,55 Q10,10 55,10 Q100,10 100,55 L100,108 Q90,97 82,108 Q74,118 66,108 Q58,97 55,108 Q52,118 44,108 Q36,97 28,108 Q20,97 10,108 Z" fill="url(#egb)" stroke="rgba(180,100,255,0.25)" stroke-width="1"/>
+                <ellipse cx="37" cy="52" rx="7.5" ry="8.5" fill="rgba(255,20,50,0.95)"/>
+                <ellipse cx="37" cy="52" rx="4.5" ry="5.5" fill="rgba(255,80,80,0.5)"/>
+                <ellipse cx="35.2" cy="50.2" rx="1.8" ry="1.8" fill="rgba(255,210,210,0.9)"/>
+                <ellipse cx="73" cy="52" rx="7.5" ry="8.5" fill="rgba(255,20,50,0.95)"/>
+                <ellipse cx="73" cy="52" rx="4.5" ry="5.5" fill="rgba(255,80,80,0.5)"/>
+                <ellipse cx="71.2" cy="50.2" rx="1.8" ry="1.8" fill="rgba(255,210,210,0.9)"/>
+                <path d="M44,72 Q55,68 66,72" stroke="rgba(200,120,255,0.3)" stroke-width="1.2" fill="none" stroke-linecap="round"/>
               </svg>
             </div>
-            <div style="font-size:44px;margin-bottom:12px;opacity:0.7">💀</div>
-            <div style="font-family:'Syne',sans-serif;font-weight:900;font-size:20px;letter-spacing:0.14em;color:#e8e4f8;margin-bottom:4px">GHOST EXECUTED</div>
-            <div id="dbExecDetailTime" style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.2em;color:#606080"></div>
+
+            <!-- Title — hollow outlined like tombstone -->
+            <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:clamp(22px,4vw,32px);letter-spacing:0.1em;color:transparent;-webkit-text-stroke:1.5px rgba(200,195,220,0.85);margin-bottom:5px;line-height:1">GHOST <span style="color:transparent;-webkit-text-stroke:1.5px rgba(220,40,60,0.95);filter:drop-shadow(0 0 8px rgba(255,30,50,0.55))">EXECUTED</span></div>
+
+            <!-- Date -->
+            <div id="dbExecDetailTime" style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.22em;color:rgba(150,130,170,0.55);margin-bottom:20px;text-transform:uppercase"></div>
+
+            <!-- EKG flatline — draws in on show -->
+            <svg width="100%" height="28" viewBox="0 0 500 28" preserveAspectRatio="none" style="opacity:0.65;display:block">
+              <polyline id="dbExecEkg"
+                points="0,14 60,14 78,14 86,2 96,26 104,14 130,14 138,8 146,20 154,14 200,14 208,10 216,18 224,14 280,14 286,14 292,2 298,26 304,14 320,14 328,8 336,20 344,14 420,14 500,14"
+                fill="none" stroke="rgba(80,200,100,0.7)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+              <!-- Red flatline overlay on tail -->
+              <line x1="420" y1="14" x2="500" y2="14" stroke="rgba(200,40,60,0.5)" stroke-width="1.2"/>
+            </svg>
+
+            <!-- Thin red rule -->
+            <div style="width:100px;height:1px;background:linear-gradient(90deg,transparent,rgba(200,40,60,0.55),transparent);margin:16px auto 0"></div>
           </div>
 
-          <!-- Distribution report — the main event -->
-          <div style="margin-bottom:16px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding:0 2px">
-              <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.2em;color:#6060a0">LEGACY DISTRIBUTION</div>
-              <div id="dbExecTotalValue" style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#6060a0"></div>
+          <!-- Distribution report -->
+          <div style="position:relative;z-index:1;padding:20px 20px 4px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.22em;color:rgba(160,140,200,0.5);text-transform:uppercase">Legacy Distribution</div>
+              <div id="dbExecTotalValue" style="font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(120,100,160,0.45)"></div>
             </div>
-            <div id="dbExecDetailBody" style="border:1px solid rgba(255,255,255,0.06);background:rgba(10,8,24,0.6);overflow:hidden">
-              <div style="padding:20px 18px;font-family:'Share Tech Mono',monospace;font-size:12px;color:#4a4a6a">Loading...</div>
+            <!-- Corner brackets on the body container -->
+            <div style="position:relative">
+              <span style="position:absolute;top:-3px;left:-3px;width:10px;height:10px;border-top:1.5px solid rgba(200,60,60,0.4);border-left:1.5px solid rgba(200,60,60,0.4)"></span>
+              <span style="position:absolute;top:-3px;right:-3px;width:10px;height:10px;border-top:1.5px solid rgba(200,60,60,0.4);border-right:1.5px solid rgba(200,60,60,0.4)"></span>
+              <span style="position:absolute;bottom:-3px;left:-3px;width:10px;height:10px;border-bottom:1.5px solid rgba(200,60,60,0.4);border-left:1.5px solid rgba(200,60,60,0.4)"></span>
+              <span style="position:absolute;bottom:-3px;right:-3px;width:10px;height:10px;border-bottom:1.5px solid rgba(200,60,60,0.4);border-right:1.5px solid rgba(200,60,60,0.4)"></span>
+              <div id="dbExecDetailBody" style="border:1px solid rgba(200,40,60,0.14);background:rgba(8,4,18,0.7);overflow:hidden">
+                <div style="padding:20px 18px;font-family:'Share Tech Mono',monospace;font-size:12px;color:#4a4a6a;letter-spacing:0.08em">Loading...</div>
+              </div>
             </div>
           </div>
 
-          <!-- Stake locked — compact -->
-          <div id="dbExecStakeRow" style="display:none;border:1px solid rgba(102,51,255,0.15);background:rgba(102,51,255,0.05);padding:13px 18px;display:flex;align-items:center;gap:12px;margin-bottom:4px">
+          <!-- Stake locked -->
+          <div id="dbExecStakeRow" style="display:none;position:relative;z-index:1;margin:12px 20px 4px;border:1px solid rgba(102,51,255,0.18);background:rgba(102,51,255,0.04);padding:12px 16px;display:flex;align-items:center;gap:12px">
+            <div style="position:absolute;top:-3px;left:-3px;width:8px;height:8px;border-top:1.5px solid rgba(102,51,255,0.3);border-left:1.5px solid rgba(102,51,255,0.3)"></div>
+            <div style="position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-top:1.5px solid rgba(102,51,255,0.3);border-right:1.5px solid rgba(102,51,255,0.3)"></div>
+            <div style="position:absolute;bottom:-3px;left:-3px;width:8px;height:8px;border-bottom:1.5px solid rgba(102,51,255,0.3);border-left:1.5px solid rgba(102,51,255,0.3)"></div>
+            <div style="position:absolute;bottom:-3px;right:-3px;width:8px;height:8px;border-bottom:1.5px solid rgba(102,51,255,0.3);border-right:1.5px solid rgba(102,51,255,0.3)"></div>
             <div style="width:22px;height:22px;flex-shrink:0;overflow:hidden" id="dbExecStakeLogo"></div>
             <div style="flex:1;min-width:0">
-              <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#b090ff"><strong id="dbExecutedStake">—</strong> $GHOST staked · locked on-chain</div>
-              <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#4a4a6a;margin-top:2px">5% paid as executor bounty · Reclaim remaining — 50% burn penalty applies</div>
+              <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:rgba(180,140,255,0.8)"><strong id="dbExecutedStake">—</strong> $GHOST staked · locked on-chain</div>
+              <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(80,70,110,0.8);margin-top:2px">5% paid as executor bounty · Reclaim remaining — 50% burn penalty applies</div>
             </div>
-            <button onclick="dbAbandonOnChain()" style="background:transparent;border:1px solid rgba(102,51,255,0.35);color:#a080ff;font-family:'Share Tech Mono',monospace;font-size:10px;padding:5px 12px;cursor:pointer;letter-spacing:0.1em;white-space:nowrap;flex-shrink:0">RECLAIM →</button>
+            <button onclick="dbAbandonOnChain()" style="background:transparent;border:1px solid rgba(102,51,255,0.3);color:rgba(160,130,255,0.8);font-family:'Share Tech Mono',monospace;font-size:10px;padding:5px 12px;cursor:pointer;letter-spacing:0.1em;white-space:nowrap;flex-shrink:0;transition:all 0.2s" onmouseover="this.style.borderColor='rgba(140,100,255,0.6)';this.style.color='#c0a0ff'" onmouseout="this.style.borderColor='rgba(102,51,255,0.3)';this.style.color='rgba(160,130,255,0.8)'">RECLAIM →</button>
+          </div>
+
+          <!-- Bottom epitaph -->
+          <div style="position:relative;z-index:1;padding:18px 20px 22px;text-align:center">
+            <div style="width:60px;height:1px;background:linear-gradient(90deg,transparent,rgba(200,40,60,0.3),transparent);margin:0 auto 14px"></div>
+            <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.16em;color:rgba(140,120,170,0.35);text-transform:uppercase">The protocol has been fulfilled</div>
           </div>
 
         </div>
@@ -3814,6 +3886,12 @@ function updateDashboardUI() {
   const execPanelEl = document.getElementById('dbExecutedPanel');
   if (execPanelEl) {
     execPanelEl.style.display = isExecuted ? 'block' : 'none';
+    if (isExecuted) {
+      // Trigger CSS animations (EKG draw, ghost float/flicker)
+      requestAnimationFrame(() => execPanelEl.classList.add('exec-visible'));
+    } else {
+      execPanelEl.classList.remove('exec-visible');
+    }
     if (isExecuted) renderExecutionDetail();
   }
   // Hide normal overview sections when executed — status orb / vault / cards / progress clutter
@@ -4610,21 +4688,41 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Only open dashboard if user was already inside it (not on landing page)
-    // Check if the main landing/marketing content is visible — if so, stay there
-    const _dashVisible = document.getElementById('dashboard')?.style.display !== 'none' &&
-                         document.getElementById('dashboard')?.style.display !== '';
-    const _landingVisible = document.getElementById('landing')?.style.display !== 'none' ||
-                            !_dashVisible;
-    // If page was refreshed while on landing, don't auto-redirect to dashboard
     const _wasInDashboard = ghostState._wasInDashboard === true;
     if (_wasInDashboard) {
-      // Show dashboard panel directly — do NOT call openDashboard() recursively
-      // as it would spawn another fetchGhostAccount that races and overwrites status
+      // Show dashboard panel — open shell immediately, then restore page after chain data loads
       const dash = document.getElementById('dashboard');
       const landing = document.getElementById('landing');
       if (dash) dash.style.display = 'flex';
       if (landing) landing.style.display = 'none';
-      dbShowPage('overview', document.getElementById('nav-overview'));
+      // Restore to the last page the user was on (not always overview)
+      const _savedPage = (() => {
+        try {
+          const lastWallet = localStorage.getItem('ghostLastWallet') || '';
+          const key = _sessionKey(lastWallet);
+          const raw = localStorage.getItem(key);
+          if (!raw) return 'overview';
+          const s = JSON.parse(raw);
+          return s.lastPage || 'overview';
+        } catch(e) { return 'overview'; }
+      })();
+      // Wait for fetchGhostAccount to complete before restoring page
+      // so status-based guards (executed, none, abandoned) work correctly
+      const _navEl = document.getElementById('nav-' + _savedPage) || document.getElementById('nav-overview');
+      dbShowPage('overview', document.getElementById('nav-overview')); // show something immediately
+      // After chain data: jump to actual saved page
+      const _origFGA = fetchGhostAccount;
+      const _restoreOnce = async () => {
+        try { await _origFGA(); } catch(e) {}
+        updateDashboardUI();
+        if (_savedPage !== 'overview') {
+          dbShowPage(_savedPage, document.getElementById('nav-' + _savedPage));
+        } else {
+          renderVaultOverview(); renderPingHistory(); renderActivityLog(); renderBeneficiaries();
+          if (ghostState.ghost?.status === 'executed') renderExecutionDetail();
+        }
+      };
+      _restoreOnce();
       loadWalletTokens();
     }
   }, 100);
@@ -4902,11 +5000,31 @@ async function renderExecutionDetail() {
         }
       }
     }
-    // Fallback to vaultTokens
+    // Fallback 1: vaultTokens (populated after fetchGhostAccount)
     if (Object.keys(mintMap).length === 0) {
       for (const t of (ghostState.vaultTokens || [])) {
         mintMap[t.mint] = { symbol: t.symbol, amount: t.balance, logoUrl: t.logoUrl || null };
       }
+    }
+    // Fallback 2: walletTokens — for v1.7 executed accounts where vault was drained
+    // and vaultTokens is empty but we can at least show what was in the vault at execution
+    if (Object.keys(mintMap).length === 0) {
+      // Try to reconstruct from any log entries that have token info, even without _tokens array
+      for (const entry of log) {
+        if (entry._mint && entry._mint !== 'native') {
+          if (!mintMap[entry._mint]) {
+            mintMap[entry._mint] = {
+              symbol: entry._symbol || (MINT_TO_SYMBOL[entry._mint]) || entry._mint.slice(0,4)+'…'+entry._mint.slice(-4),
+              amount: entry._amount || null,
+              logoUrl: entry._logoUrl || null
+            };
+          }
+        }
+      }
+    }
+    // Fallback 3: if still empty, show a single "All tokens" placeholder
+    if (Object.keys(mintMap).length === 0) {
+      mintMap['__all__'] = { symbol: 'All tokens', amount: null, logoUrl: null };
     }
   }
 
