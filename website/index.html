@@ -1227,7 +1227,7 @@
 
         <div class="db-form" style="border-color:rgba(255,61,90,0.2)">
           <div class="db-form-title" style="color:var(--red)" id="dangerZoneTitle">⚠️ Danger Zone</div>
-          <div class="db-info" style="border-color:var(--red)" id="dangerZoneDesc"><strong>Abandon Ghost:</strong> Permanently closes your vault. Burns 50% of your staked $GHOST. Cannot be undone.</div>
+          <div class="db-info" style="border-color:var(--red)" id="dangerZoneDesc"><strong>Abandon Ghost:</strong> Permanently closes your ghost on-chain. Burns 50% of staked $GHOST. Cannot be undone.</div>
           <button class="db-btn db-btn-danger" id="dangerZoneBtn" onclick="dbAbandonOnChain()">💀 Abandon Ghost</button>
         </div>
       </div>
@@ -1289,7 +1289,7 @@
                 </div>
               </div>
               <div id="stakeWarning" style="display:none;font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--red);margin-bottom:10px">⚠️ Minimum 10,000 $GHOST required to summon</div>
-              <div style="font-family:'Share Tech Mono',monospace;font-size:13px;color:rgba(255,120,100,0.9)">⚠️ 50% of staked $GHOST is burned permanently if you abandon your ghost</div>
+              <div style="font-family:'Share Tech Mono',monospace;font-size:13px;color:rgba(255,120,100,0.9)">⚠️ 50% of staked $GHOST is burned permanently if you abandon your ghost · 5% goes to the executor bot as a bounty if your ghost is triggered</div>
             </div>
 
           </div>
@@ -2822,6 +2822,7 @@ const GHOST_DISC_LABELS = {
   'ea3081dc28de3a9f': '🔥 Token burn executed',
   '345d3184612eda0d': '📤 Whole vault transfer executed',
   '59da97947864b51c': '🔥 Whole vault burn executed',
+  'cad1a6fc15343cc2': '💀 Ghost abandoned',
 };
 // Discriminators that indicate a guardian action (for angel icon tagging)
 const GUARDIAN_DISCS = new Set([
@@ -3493,6 +3494,21 @@ function parseGhostAccount(bytes) {
 }
 
 // ── Danger Zone: adapt labels for executed (reclaim) vs alive (abandon) ──
+// Update init page to show permanent closure notice for abandoned wallets
+function _updateInitPageForAbandoned() {
+  const _initTitle = document.getElementById('initTitle');
+  const _initSub   = document.getElementById('initSub');
+  const _stakeSection = document.getElementById('initStakeSection');
+  const _summonBtn = document.querySelector('#db-page-init button[onclick*="initializeGhost"]');
+  if (_initTitle) _initTitle.textContent = 'Ghost Permanently Closed';
+  if (_initSub) _initSub.innerHTML = 'This wallet previously abandoned a ghost.<br>A new ghost cannot be summoned on this wallet address.<br><span style="color:#4a3a6a;font-size:11px">Use a different wallet to start a new ghost.</span>';
+  if (_stakeSection) _stakeSection.style.display = 'none';
+  if (_summonBtn) { _summonBtn.disabled = true; _summonBtn.style.opacity = '0.3'; _summonBtn.style.cursor = 'not-allowed'; _summonBtn.textContent = '⛔ Wallet Permanently Closed'; }
+  // Hide the burn warning line too
+  const _burnWarning = document.querySelector('#db-page-init .db-form div[style*="rgba(255,120,100"]');
+  if (_burnWarning) _burnWarning.style.display = 'none';
+}
+
 function syncDangerZone() {
   const isExecuted = ghostState.ghost?.status === 'executed';
   const titleEl = document.getElementById('dangerZoneTitle');
@@ -3507,7 +3523,7 @@ function syncDangerZone() {
     btnEl.style.color = '#a060ff';
   } else {
     titleEl.innerHTML = '⚠️ Danger Zone';
-    descEl.innerHTML  = '<strong>Abandon Ghost:</strong> Permanently closes your vault. Burns 50% of your staked $GHOST. Cannot be undone.';
+    descEl.innerHTML  = '<strong>Abandon Ghost:</strong> Permanently closes your ghost on-chain. Burns 50% of staked $GHOST. Cannot be undone.';
     btnEl.textContent = '💀 Abandon Ghost';
     btnEl.style.borderColor = '';
     btnEl.style.color = '';
@@ -3516,7 +3532,7 @@ function syncDangerZone() {
 
 function updateDashboardUI() {
   const g = ghostState.ghost;
-  const isNone = g.status === 'none' || g.status === 'needs-migration';
+  const isNone = g.status === 'none' || g.status === 'needs-migration' || g.status === 'abandoned';
   const isMigration = g.status === 'needs-migration';
 
   // Show/hide overview migration banner
@@ -3588,6 +3604,12 @@ function updateDashboardUI() {
         if (_stakeSection) _stakeSection.style.opacity = '1';
         if (_stakeLabel) _stakeLabel.textContent = 'Minimum 10,000 $GHOST required';
         if (_stakeInput) { _stakeInput.disabled = false; _stakeInput.style.opacity = '1'; if (!_stakeInput.value || _stakeInput.value === '0') _stakeInput.value = '10000'; }
+        // Async check: if wallet has abandoned before, update UI (RPC may take a moment)
+        if (ghostState.publicKey && ghostState.ghostPda) {
+          checkWalletAbandoned(ghostState.publicKey, ghostState.ghostPda).then(abandoned => {
+            if (abandoned) _updateInitPageForAbandoned();
+          }).catch(() => {});
+        }
       }
     }
     // Keep overview nav highlighted
@@ -4012,7 +4034,77 @@ function validateStakeInput(el) {
 }
 
 // ─── Initialize Ghost ────────────────────────────────────────────
+
+// Check on-chain (+ localStorage cache) whether this wallet has ever called abandon_ghost.
+// Ghost PDA is deterministic so its tx history persists even after the account is closed.
+// localStorage is used as a fast cache to avoid an RPC round-trip on every page load.
+const ABANDON_DISC_HEX = 'cad1a6fc15343cc2'; // sha256("global:abandon_ghost")[0:8]
+
+async function checkWalletAbandoned(pubkey, ghostPdaStr) {
+  if (!pubkey || !ghostPdaStr) return false;
+  // Fast path: localStorage cache (cross-device will miss, fall through to RPC)
+  try {
+    if (localStorage.getItem('ghostAbandoned_' + pubkey)) return true;
+  } catch(e) {}
+
+  // On-chain: check ghost PDA tx history for abandon_ghost discriminator
+  try {
+    const sigsRes = await fetch(RPC_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'abandonCheck', method: 'getSignaturesForAddress',
+        params: [ghostPdaStr, { limit: 100, commitment: 'confirmed' }] })
+    });
+    const sigsData = await sigsRes.json();
+    const sigs = (sigsData.result || []).filter(s => !s.err).map(s => s.signature);
+    if (sigs.length === 0) return false;
+
+    // Fetch transactions in batches of 10
+    for (let i = 0; i < Math.min(sigs.length, 30); i += 10) {
+      const batch = sigs.slice(i, i + 10);
+      try {
+        const txRes = await fetch(RPC_URL, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 'abandonTx', method: 'getParsedTransactions',
+            params: [batch, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }] })
+        });
+        const txData = await txRes.json();
+        for (const tx of (txData.result || [])) {
+          if (!tx) continue;
+          for (const ix of (tx.transaction?.message?.instructions || [])) {
+            const d = ix.data;
+            if (!d) continue;
+            // Decode first 8 bytes of instruction data from base58 and compare to abandon disc
+            try {
+              const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+              let n = 0n;
+              for (const c of d) { const i = B58.indexOf(c); if (i < 0) break; n = n * 58n + BigInt(i); }
+              const bytes = new Uint8Array(8);
+              for (let j = 7; j >= 0; j--) { bytes[j] = Number(n & 0xffn); n >>= 8n; }
+              const hex = Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('');
+              if (hex === ABANDON_DISC_HEX) {
+                // Cache result so future checks are instant
+                try { localStorage.setItem('ghostAbandoned_' + pubkey, '1'); } catch(e) {}
+                console.log('[Ghost] Abandon tx found on-chain for', pubkey);
+                return true;
+              }
+            } catch(_) {}
+          }
+        }
+      } catch(e) { console.warn('[Ghost] Abandon check batch error:', e); }
+    }
+  } catch(e) { console.warn('[Ghost] Abandon on-chain check failed:', e); }
+  return false;
+}
+
 async function initializeGhost() {
+  // Block re-summon on wallets that have previously abandoned — check on-chain
+  showNotif('Checking wallet history...', '');
+  const _abandoned = await checkWalletAbandoned(ghostState.publicKey, ghostState.ghostPda);
+  if (_abandoned) {
+    showNotif('⛔ This wallet previously abandoned a ghost. A new ghost cannot be summoned on this wallet.', 'error');
+    _updateInitPageForAbandoned();
+    return;
+  }
   const _initIntervalVal = parseFloat(document.getElementById('initInterval')?.value) || 365;
   const _initIntervalUnit = document.getElementById('initIntervalUnit')?.value || 'days';
   const _initGraceVal = parseFloat(document.getElementById('initGrace')?.value ?? '0');
@@ -9096,6 +9188,13 @@ async function dbAbandonOnChain() {
       sig.slice(0,4)+'...'+sig.slice(-4)
     );
 
+    // Permanently mark this wallet as having abandoned — blocks re-summon on same wallet
+    try {
+      const _abandonedKey = 'ghostAbandoned_' + ghostState.publicKey;
+      localStorage.setItem(_abandonedKey, JSON.stringify({ ts: Date.now(), executed: _isExecuted, sig }));
+      console.log('[Ghost] Wallet marked as abandoned in localStorage:', ghostState.publicKey);
+    } catch(e) { console.warn('[Ghost] Could not mark abandoned:', e); }
+
     // Show abandon animation then aftermath
     await dbAbandon(true, true, _isExecuted); // skip confirm, onChain=true
   } catch(err) {
@@ -9218,15 +9317,20 @@ async function dbAbandon(skipConfirm, onChain, wasExecuted) {
       </div>
 
       <div style="text-align:center">
-        ${onChain ? '' : `<button onclick="dbSummonNew()" style="background:rgba(102,51,255,0.15);border:1px solid rgba(102,51,255,0.4);color:#a060ff;padding:12px 32px;border-radius:8px;cursor:pointer;font-family:'Syne',sans-serif;font-weight:700;font-size:15px;transition:all 0.2s" onmouseover="this.style.background='rgba(102,51,255,0.25)'" onmouseout="this.style.background='rgba(102,51,255,0.15)'">
-          👻 Register New Ghost
-        </button>`}
+        ${onChain
+          ? `<button onclick="dbSummonNew()" style="background:rgba(102,51,255,0.15);border:1px solid rgba(102,51,255,0.4);color:#a060ff;padding:12px 32px;border-radius:8px;cursor:pointer;font-family:'Syne',sans-serif;font-weight:700;font-size:15px;transition:all 0.2s" onmouseover="this.style.background='rgba(102,51,255,0.25)'" onmouseout="this.style.background='rgba(102,51,255,0.15)'">
+              👻 Summon a New Ghost
+            </button>`
+          : `<button onclick="dbSummonNew()" style="background:rgba(102,51,255,0.15);border:1px solid rgba(102,51,255,0.4);color:#a060ff;padding:12px 32px;border-radius:8px;cursor:pointer;font-family:'Syne',sans-serif;font-weight:700;font-size:15px;transition:all 0.2s" onmouseover="this.style.background='rgba(102,51,255,0.25)'" onmouseout="this.style.background='rgba(102,51,255,0.15)'">
+              👻 Register New Ghost
+            </button>`
+        }
       </div>
     </div>`;
 
   // Helper to restart — go straight to init form without reload
   window.dbSummonNew = function() {
-    ghostState.ghost = { status:'none', lastHeartbeat:null, intervalSeconds:365*86400, gracePeriodSeconds:30*86400, awakenedAt:null, executed:false, stakedGhost:0, pingCount:0, vaultBalance:0, recoveryWallet:null, beneficiaries:[], wholeVaultAction:0, _isMigration:true };
+    ghostState.ghost = { status:'none', lastHeartbeat:null, intervalSeconds:365*86400, gracePeriodSeconds:30*86400, awakenedAt:null, executed:false, stakedGhost:0, pingCount:0, vaultBalance:0, recoveryWallet:null, beneficiaries:[], wholeVaultAction:0 };
     // Keep walletTokens — needed for GHOST balance check in initializeGhost
     ghostState.vaultTokens = [];
     ghostState.activityLog = [];
