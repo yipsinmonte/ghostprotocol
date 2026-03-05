@@ -9703,11 +9703,14 @@ async function dbWithdrawAsset(mintKey) {
     }
     console.log('[Ghost] ownerAta:', ownerAta.toBase58(), 'vaultAta:', vaultAta.toBase58());
 
+    // Check ATA existence BEFORE fetching blockhash — getAccountInfo is slow and
+    // would make the blockhash stale by the time we send, causing simulation failures
+    const ownerAtaInfo = await connection.getAccountInfo(ownerAta);
+
+    // Fetch blockhash last — minimises time between fetch and send
     const { blockhash } = await connection.getLatestBlockhash();
     const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
 
-    // Create owner ATA if missing — only needed for SPL (not SOL, handled above)
-    const ownerAtaInfo = await connection.getAccountInfo(ownerAta);
     if (!ownerAtaInfo) {
       console.log('[Ghost] Owner ATA missing — prepending createATA ix for', withdrawMintPk.toBase58());
       tx.add(createATAInstruction(walletPk, ownerAta, walletPk, withdrawMintPk, rawTokenProgPk));
