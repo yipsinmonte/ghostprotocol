@@ -8540,23 +8540,47 @@ for (const [progStr, items] of Object.entries(splGroups)) {
 // ── Phase 4: SOL deposit ──────────────────────────────────────────────────────────────────
 for (const t of solTokens) {
   try {
-    // Dynamically compute reserve: wSOL account rent + estimated fees for this + future txs
+    // Re-fetch actual native SOL balance RIGHT NOW — SPL batch txs above consumed fees
+    // so t.balance is stale. Use on-chain lamports as the true starting point.
+    let liveNativeLamports = 0;
+    try {
+      const balResp = await fetch(RPC_URL, { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({jsonrpc:'2.0',id:'solbal',method:'getBalance',params:[ghostState.publicKey]}) });
+      const balData = await balResp.json();
+      liveNativeLamports = balData.result?.value || 0;
+    } catch(_) {}
+    const liveNativeSOL = liveNativeLamports / 1e9;
+
+    // Check if wSOL ATA already exists — reuse it (no rent needed), else reserve for new account
+    const wsolAtaDerived = await deriveATA(walletPk, WSOL_MINT_PK);
+    const existingWsol = await connection.getAccountInfo(wsolAtaDerived).catch(()=>null);
     const wsolRent = await connection.getMinimumBalanceForRentExemption(165);
-    // Check if wSOL ATA already exists — if so, no rent needed
-    const existingWsol = await connection.getAccountInfo(await deriveATA(walletPk, WSOL_MINT_PK)).catch(()=>null);
     const rentReserve = existingWsol ? 0 : wsolRent / 1e9;
-    // Check if Token-2022 tokens are in the vault (their ATA creation costs extra rent)
-    const hasT22 = validSpl.some(m => m.rawTokenProgPk.toBase58() === TOKEN_2022_STR);
-    // Reserve: dynamic rent + 0.01 per expected tx (wrap + deposit + withdraw + 2 beneficiary ops)
-    const SOL_RESERVE = rentReserve + (hasT22 ? 0.06 : 0.04);
-    const rawBalance = t.balance;
-    const amount = Math.max(0, rawBalance - SOL_RESERVE);
+
+    // Reserve: rent (if needed) + 0.004 per tx × ~5 future txs (wrap/deposit/withdraw/bene ×2)
+    const SOL_RESERVE = rentReserve + 0.025;
+    const amount = Math.max(0, liveNativeSOL - SOL_RESERVE);
     if (amount <= 0) {
-      showNotif('⚠️ Not enough SOL to deposit after reserving ' + SOL_RESERVE.toFixed(3) + ' SOL for fees', 'error');
+      showNotif('⚠️ Only ' + liveNativeSOL.toFixed(4) + ' SOL remaining after SPL fees — need >' + SOL_RESERVE.toFixed(3) + ' to deposit', 'error');
       continue;
     }
     const lamports = Math.round(amount * 1e9);
-    showNotif('Preparing SOL deposit (' + amount.toFixed(4) + ' SOL, reserving ' + SOL_RESERVE.toFixed(3) + ')...', '');
+    // Check for stranded wSOL in wallet (from previous failed wrap attempts) and sweep it in
+    let strandedWsolLamports = 0;
+    let strandedWsolAcct = null;
+    try {
+      const wsolAccts = await connection.getTokenAccountsByOwner(walletPk, { mint: WSOL_MINT_PK });
+      for (const wa of wsolAccts.value) {
+        const raw = BigInt(wa.account?.data?.parsed?.info?.tokenAmount?.amount || '0');
+        if (raw > 0n) { strandedWsolLamports = Number(raw); strandedWsolAcct = wa.pubkey; break; }
+      }
+    } catch(_) {}
+    const totalLamports = lamports + strandedWsolLamports;
+    if (strandedWsolLamports > 0) {
+      showNotif('Sweeping ' + (strandedWsolLamports/1e9).toFixed(4) + ' stranded wSOL + ' + amount.toFixed(4) + ' SOL...', '');
+    } else {
+      showNotif('Preparing SOL deposit (' + amount.toFixed(4) + ' SOL, reserving ' + SOL_RESERVE.toFixed(3) + ')...', '');
+    }
 
     // Pre-fetch vault wSOL ATA
     let vaultWsolAta;
@@ -8578,7 +8602,21 @@ for (const t of solTokens) {
       resolvedVaultWsolAta = vaultKp.publicKey;
     }
 
-    const amountRaw = BigInt(lamports);
+    // If stranded wSOL exists in a different account than wsolAta, add a transfer+syncNative to consolidate
+    if (strandedWsolAcct && strandedWsolAcct.toBase58() !== wsolAta.toBase58()) {
+      // Transfer stranded wSOL token balance into wsolAta via SPL transfer, then syncNative
+      // Simpler: just close stranded account back to native SOL, then wrap naturally
+      combinedTx.add(new solanaWeb3.TransactionInstruction({
+        programId: TOKEN_PROG_PK,
+        keys: [
+          { pubkey: strandedWsolAcct, isSigner: false, isWritable: true },
+          { pubkey: walletPk,         isSigner: false, isWritable: true },
+          { pubkey: walletPk,         isSigner: true,  isWritable: false },
+        ],
+        data: new Uint8Array([9]) // CloseAccount — returns lamports to wallet
+      }));
+    }
+    const amountRaw = BigInt(totalLamports);
     const buf = new ArrayBuffer(8); new DataView(buf).setBigUint64(0, amountRaw, true);
     const data = new Uint8Array(16); data.set(depositDisc, 0); data.set(new Uint8Array(buf), 8);
     combinedTx.add(new TransactionInstruction({ programId, keys: [
@@ -8599,11 +8637,12 @@ for (const t of solTokens) {
     const conf = await connection.confirmTransaction(depSig, 'confirmed');
     if (conf.value?.err) throw new Error('TX failed: ' + JSON.stringify(conf.value.err));
 
+    const totalDepositedSOL = totalLamports / 1e9;
     const existing = ghostState.vaultTokens.find(v => v.mint === 'native' || v.mint === 'So11111111111111111111111111111111111111112');
-    if (existing) { existing.balance += amount; existing.mint = 'native'; }
-    else { ghostState.vaultTokens.push({ symbol: 'SOL', mint: 'native', balance: amount, decimals: 9, logoUrl: null, _pendingDeposit: Date.now() }); }
+    if (existing) { existing.balance += totalDepositedSOL; existing.mint = 'native'; }
+    else { ghostState.vaultTokens.push({ symbol: 'SOL', mint: 'native', balance: totalDepositedSOL, decimals: 9, logoUrl: null, _pendingDeposit: Date.now() }); }
     t.balance = 0;
-    addActivityRow('Vault Deposit ' + amount.toLocaleString() + ' SOL', depSig.slice(0,4)+'...'+depSig.slice(-4), 'deposit');
+    addActivityRow('Vault Deposit ' + totalDepositedSOL.toLocaleString() + ' SOL', depSig.slice(0,4)+'...'+depSig.slice(-4), 'deposit');
     successCount++;
   } catch(err) { console.error('SOL deposit error:', err); showNotif('SOL deposit failed: ' + (err.message || err), 'error'); }
 }
