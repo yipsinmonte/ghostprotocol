@@ -3499,19 +3499,57 @@ function parseGhostAccount(bytes) {
 }
 
 // ── Danger Zone: adapt labels for executed (reclaim) vs alive (abandon) ──
-// Update init page to show permanent closure notice for abandoned wallets
+// Update init page to show permanent closure tombstone for abandoned wallets
 function _updateInitPageForAbandoned() {
-  const _initTitle = document.getElementById('initTitle');
-  const _initSub   = document.getElementById('initSub');
-  const _stakeSection = document.getElementById('initStakeSection');
-  const _summonBtn = document.querySelector('#db-page-init button[onclick*="initializeGhost"]');
-  if (_initTitle) _initTitle.textContent = 'Ghost Permanently Closed';
-  if (_initSub) _initSub.innerHTML = 'This wallet previously abandoned a ghost.<br>A new ghost cannot be summoned on this wallet address.<br><span style="color:#4a3a6a;font-size:11px">Use a different wallet to start a new ghost.</span>';
-  if (_stakeSection) _stakeSection.style.display = 'none';
-  if (_summonBtn) { _summonBtn.disabled = true; _summonBtn.style.opacity = '0.3'; _summonBtn.style.cursor = 'not-allowed'; _summonBtn.textContent = '⛔ Wallet Permanently Closed'; }
-  // Hide the burn warning line too
-  const _burnWarning = document.querySelector('#db-page-init .db-form div[style*="rgba(255,120,100"]');
-  if (_burnWarning) _burnWarning.style.display = 'none';
+  const _page = document.getElementById('db-page-init');
+  if (!_page) return;
+
+  if (!document.getElementById('tombstone-styles')) {
+    const _s = document.createElement('style');
+    _s.id = 'tombstone-styles';
+    _s.textContent = [
+      '.tombstone-wrap{min-height:80vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 24px;position:relative;overflow:hidden}',
+      '.tombstone-wrap::before{content:"";position:absolute;inset:0;background:radial-gradient(ellipse 60% 40% at 50% 30%,rgba(80,0,0,0.18) 0%,transparent 70%);pointer-events:none}',
+      '.tombstone-scanlines{position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.08) 3px,rgba(0,0,0,0.08) 4px);pointer-events:none;opacity:0.5}',
+      '.tombstone-glyph{font-size:72px;line-height:1;margin-bottom:32px;animation:tbFloat 4s ease-in-out infinite;position:relative}',
+      '.tombstone-glyph::after{content:"";position:absolute;bottom:-12px;left:50%;transform:translateX(-50%);width:60px;height:8px;background:radial-gradient(ellipse,rgba(180,0,0,0.25) 0%,transparent 70%);border-radius:50%}',
+      '@keyframes tbFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}',
+      '.tombstone-title{font-family:"Syne",sans-serif;font-weight:800;font-size:clamp(28px,5vw,42px);letter-spacing:0.04em;color:#c8c8d8;margin-bottom:6px;text-align:center}',
+      '.tombstone-title span{color:rgba(200,80,80,0.9)}',
+      '.tombstone-rule{width:120px;height:1px;background:linear-gradient(90deg,transparent,rgba(180,60,60,0.5),transparent);margin:20px auto}',
+      '.tombstone-epitaph{font-family:"Share Tech Mono",monospace;font-size:13px;color:rgba(160,150,180,0.7);text-align:center;line-height:2;letter-spacing:0.08em;max-width:380px;margin-bottom:40px}',
+      '.tombstone-wallet{font-family:"Share Tech Mono",monospace;font-size:11px;color:rgba(120,110,140,0.6);background:rgba(255,255,255,0.02);border:1px solid rgba(180,60,60,0.12);padding:10px 20px;letter-spacing:0.06em;margin-bottom:48px}',
+      '.tombstone-divider{width:100%;max-width:480px;height:1px;background:linear-gradient(90deg,transparent,rgba(102,51,255,0.15),transparent);margin-bottom:32px}',
+      '.tombstone-cta{font-family:"Share Tech Mono",monospace;font-size:12px;color:rgba(140,120,180,0.5);letter-spacing:0.1em;text-transform:uppercase;text-align:center}',
+      '.tombstone-heartbeat{display:flex;align-items:center;gap:8px;margin-top:36px;font-family:"Share Tech Mono",monospace;font-size:11px;color:rgba(100,180,100,0.5);letter-spacing:0.06em}'
+    ].join('');
+    document.head.appendChild(_s);
+  }
+
+  var _wallet = ghostState.publicKey || '';
+  var _ws = _wallet ? _wallet.slice(0,6) + '\u00B7\u00B7\u00B7' + _wallet.slice(-6) : '\u2014';
+
+  _page.innerHTML =
+    '<div class="tombstone-wrap">' +
+      '<div class="tombstone-scanlines"></div>' +
+      '<div class="tombstone-glyph">\uD83D\uDC7B</div>' +
+      '<div class="tombstone-title">GHOST <span>CLOSED</span></div>' +
+      '<div class="tombstone-rule"></div>' +
+      '<div class="tombstone-epitaph">' +
+        'THIS WALLET HAS PASSED<br>' +
+        'THE PROTOCOL HAS BEEN FULFILLED<br>' +
+        'NO NEW GHOST MAY BE SUMMONED HERE' +
+      '</div>' +
+      '<div class="tombstone-wallet">' + _ws + '</div>' +
+      '<div class="tombstone-divider"></div>' +
+      '<div class="tombstone-cta">use a different wallet to summon a new ghost</div>' +
+      '<div class="tombstone-heartbeat">' +
+        '<svg width="40" height="16" viewBox="0 0 40 16">' +
+          '<polyline points="0,8 6,8 9,2 12,14 15,8 22,8 25,4 28,12 31,8 40,8" fill="none" stroke="rgba(100,200,100,0.6)" stroke-width="1.5" stroke-linejoin="round"/>' +
+        '</svg>' +
+        'heartbeat checker still available' +
+      '</div>' +
+    '</div>';
 }
 
 function syncDangerZone() {
