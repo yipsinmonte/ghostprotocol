@@ -4051,54 +4051,50 @@ async function checkWalletAbandoned(pubkey, ghostPdaStr) {
     if (localStorage.getItem('ghostAbandoned_' + pubkey)) return true;
   } catch(e) {}
 
-  // On-chain: check ghost PDA tx history for abandon_ghost discriminator
+  // On-chain: fetch each tx individually via getTransaction with base64 encoding.
+  // getParsedTransactions is not supported on all Helius plans — this method works universally.
   try {
     console.log('[Ghost] Checking abandon history for PDA:', ghostPdaStr);
     const sigsRes = await fetch(RPC_URL, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 'abandonCheck', method: 'getSignaturesForAddress',
-        params: [ghostPdaStr, { limit: 100, commitment: 'confirmed' }] })
+        params: [ghostPdaStr, { limit: 50, commitment: 'confirmed' }] })
     });
     const sigsData = await sigsRes.json();
     const sigs = (sigsData.result || []).filter(s => !s.err).map(s => s.signature);
     console.log('[Ghost] Abandon check: found', sigs.length, 'sigs on ghost PDA');
     if (sigs.length === 0) return false;
 
-    // Fetch transactions in batches of 10
-    for (let i = 0; i < Math.min(sigs.length, 30); i += 10) {
-      const batch = sigs.slice(i, i + 10);
+    // Send all requests in parallel — base64 getTransaction works on all Helius plans
+    const txResults = await Promise.all(sigs.slice(0, 50).map(sig =>
+      fetch(RPC_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: sig, method: 'getTransaction',
+          params: [sig, { encoding: 'base64', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }] }) })
+      .then(r => r.json()).catch(() => null)
+    ));
+
+    for (const res of txResults) {
+      if (!res?.result) continue;
+      // message is base64 encoded — decode and scan for abandon discriminator bytes
+      const msgData = res.result.transaction?.message;
+      if (!msgData) continue;
+      // In base64 encoding, message is an array: [base64string, encoding]
+      const msgB64 = Array.isArray(msgData) ? msgData[0] : null;
+      if (!msgB64) continue;
       try {
-        const txRes = await fetch(RPC_URL, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 'abandonTx', method: 'getParsedTransactions',
-            params: [batch, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }] })
-        });
-        const txData = await txRes.json();
-        const txs = txData.result || [];
-        console.log('[Ghost] Abandon check batch', i, ': fetched', txs.filter(Boolean).length, 'txs');
-        for (const tx of txs) {
-          if (!tx) continue;
-          const ixList = tx.transaction?.message?.instructions || [];
-          for (const ix of ixList) {
-            const d = ix.data;
-            if (!d) continue;
-            try {
-              const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-              let n = 0n;
-              for (const c of d) { const idx = B58.indexOf(c); if (idx < 0) break; n = n * 58n + BigInt(idx); }
-              const bytes = new Uint8Array(8);
-              for (let j = 7; j >= 0; j--) { bytes[j] = Number(n & 0xffn); n >>= 8n; }
-              const hex = Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('');
-              console.log('[Ghost] ix disc hex:', hex, 'vs', ABANDON_DISC_HEX);
-              if (hex === ABANDON_DISC_HEX) {
-                try { localStorage.setItem('ghostAbandoned_' + pubkey, '1'); } catch(e) {}
-                console.log('[Ghost] ✅ Abandon tx found on-chain for', pubkey);
-                return true;
-              }
-            } catch(e) { console.warn('[Ghost] ix decode error:', e); }
-          }
+        const msgBytes = Uint8Array.from(atob(msgB64), c => c.charCodeAt(0));
+        // Convert target disc hex to bytes for comparison
+        const discBytes = new Uint8Array(8);
+        for (let i = 0; i < 8; i++) discBytes[i] = parseInt(ABANDON_DISC_HEX.slice(i*2, i*2+2), 16);
+        // Scan message bytes for the discriminator sequence
+        outer: for (let i = 0; i < msgBytes.length - 8; i++) {
+          for (let j = 0; j < 8; j++) { if (msgBytes[i+j] !== discBytes[j]) continue outer; }
+          // Found discriminator in this tx
+          try { localStorage.setItem('ghostAbandoned_' + pubkey, '1'); } catch(e) {}
+          console.log('[Ghost] ✅ Abandon discriminator found in tx for', pubkey);
+          return true;
         }
-      } catch(e) { console.warn('[Ghost] Abandon check batch error:', e); }
+      } catch(e) { console.warn('[Ghost] tx decode error:', e); }
     }
   } catch(e) { console.warn('[Ghost] Abandon on-chain check failed:', e); }
   console.log('[Ghost] No abandon tx found for', pubkey);
