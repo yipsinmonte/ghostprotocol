@@ -5078,6 +5078,11 @@ async function renderExecutionDetail() {
     } catch(e) { console.warn('[Ghost] Execution detail metadata fetch failed:', e); }
   }
 
+  // ── Strip GHOST_MINT from mintMap — stake bounty is a separate on-chain transfer
+  // from the stake_vault PDA, not a user vault asset. Showing it here is misleading.
+  delete mintMap[GHOST_MINT];
+  delete mintMap[DBD_MINT];
+
   // ── Build distribution lines ──
   const lines = [];
 
