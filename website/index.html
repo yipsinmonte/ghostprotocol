@@ -7856,12 +7856,9 @@ async function loadWalletTokens() {
             ghostState.vaultTokens.forEach(v => {
               if (v._pendingDeposit && freshVault.find(f => f.mint === v.mint)) delete v._pendingDeposit;
             });
-            // Clear _withdrawnMints only when the on-chain vault account is confirmed
-            // empty (zero balance) or absent. We check against the RAW vaultAccts array
-            // (before the _withdrawnMints filter at line ~7786), NOT freshVault — because
-            // freshVault already excluded withdrawn mints, creating a circular dependency
-            // where every withdrawn mint appears "absent", gets cleared, then reappears
-            // on the next scan cycle.
+            // ⚠️ Clear _withdrawnMints only when on-chain vault account has zero balance or is absent.
+            // Must check RAW vaultAccts (pre-filter), NOT freshVault which already excluded withdrawn
+            // mints — otherwise every withdrawn mint appears "absent", gets cleared, then reappears.
             let _withdrawnChanged = false;
             for (const wm of ghostState._withdrawnMints) {
               const wmWsol = wm === 'native' ? 'So11111111111111111111111111111111111111112' : wm;
@@ -7869,13 +7866,11 @@ async function loadWalletTokens() {
                 const m = a.account?.data?.parsed?.info?.mint;
                 return m === wm || m === wmWsol;
               });
-              // Only clear if account genuinely gone or balance is zero
               if (!rawAcct) {
                 ghostState._withdrawnMints.delete(wm); _withdrawnChanged = true;
               } else {
                 const rawBal = BigInt(rawAcct.account?.data?.parsed?.info?.tokenAmount?.amount || '0');
                 if (rawBal <= 0n) { ghostState._withdrawnMints.delete(wm); _withdrawnChanged = true; }
-                // else: account still has balance on chain — keep suppressing until it drains
               }
             }
             if (_withdrawnChanged) _saveWithdrawnMints();
