@@ -2535,12 +2535,13 @@ function closeModal() { document.getElementById('walletModal').classList.remove(
 
 // ─── Ghost-styled confirm dialog ─────────────────────────────────────────────
 let _ghostConfirmResolve = null;
-function ghostConfirm({ icon='👻', title='Confirm', message='', okLabel='CONFIRM', danger=false }={}) {
+function ghostConfirm({ icon='👻', title='Confirm', message='', html='', okLabel='CONFIRM', danger=false }={}) {
   return new Promise(resolve => {
     _ghostConfirmResolve = resolve;
     document.getElementById('ghostConfirmIcon').textContent = icon;
     document.getElementById('ghostConfirmTitle').textContent = title;
-    document.getElementById('ghostConfirmMsg').textContent = message;
+    const msgEl = document.getElementById('ghostConfirmMsg');
+    if (html) { msgEl.innerHTML = html; } else { msgEl.textContent = message; }
     const btn = document.getElementById('ghostConfirmOkBtn');
     btn.textContent = okLabel;
     if (danger) {
@@ -3179,7 +3180,7 @@ const GHOST_DISC_LABELS = {
   '431b18998740ca4d': '\u274C Beneficiary removed',
   '51a633d59e549d6c': '\u2699\uFE0F Settings updated',
   'd9efe14bf40efc5b': 'Whole vault recipient set',
-  '63a333690b0b3b22': 'Guardian Withdrawal',
+  '63a33369b0b34322': '📤 Guardian withdrew',
   // v1.4 instructions
   '56e2173908f67822': '\u{1F5D1} All beneficiaries cleared',
   '7e7adb46bc7ef37e': '\u270F\uFE0F Beneficiary updated',
@@ -3287,7 +3288,7 @@ async function fetchOnChainHistory() {
             const hex=b58ToDiscHex(ix.data);
             if (GHOST_DISC_LABELS[hex]) {
               baseLabel=GHOST_DISC_LABELS[hex]; matchHex=hex; matchIx=ix;
-              isDeposit=hex==='123e6e081a6af897'; isWithdraw=hex==='b422252e9c00d3ee'; break;
+              isDeposit=hex==='123e6e081a6af897'; isWithdraw=hex==='b422252e9c00d3ee'||hex==='63a33369b0b34322'; break;
             }
           } catch(e){}
         }
@@ -3305,7 +3306,8 @@ async function fetchOnChainHistory() {
             if (amt&&sym) {
               const n=parseFloat(amt);
               const fmt=n>=1000?n.toLocaleString(undefined,{maximumFractionDigits:2}):parseFloat(n.toPrecision(4)).toString();
-              return (isDeposit?'Vault Deposit ':'Vault Withdrawal ')+fmt+' '+sym;
+              const isGuardian = matchHex==='63a33369b0b34322';
+              return (isDeposit?'Vault Deposit ':isGuardian?'📤 Guardian withdrew ':'Vault Withdrawal ')+fmt+' '+sym;
             }
           }
         }
@@ -8900,20 +8902,38 @@ function renderVaultHoldings() {
 }
 
 // ─── Bulk deposit / withdraw ────────────────────────────────────
-function confirmDepositAll() {
+async function confirmDepositAll() {
   const tokens = ghostState.walletTokens.filter(tok => tok.balance > 0 && !isProtocolMint(tok.mint));
   if (tokens.length === 0) { showNotif('No assets with balance in wallet', 'error'); return; }
   const feeTokens = tokens.filter(t => t._feeBps && t._feeBps > 0);
+
+  // Build styled token list HTML
+  const tokenRows = tokens.map(t => {
+    const feeTag = t._feeBps && t._feeBps > 0
+      ? `<span style="color:#ff9040;font-size:10px;margin-left:6px">${formatFeePct(t._feeBps)} fee</span>`
+      : '';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(102,51,255,0.08)">
+      <span style="color:#e0ddf0">${t.symbol}${feeTag}</span>
+      <span style="color:#c0bce0">${t.balance.toLocaleString(undefined,{maximumFractionDigits:6})}</span>
+    </div>`;
+  }).join('');
+
   const feeWarning = feeTokens.length > 0
-    ? '\n\n⚠️ ' + feeTokens.map(t => t.symbol + ' (' + formatFeePct(t._feeBps) + ' transfer fee)').join(', ') + ' — vault will receive less than deposited amount.'
+    ? `<div style="margin-top:12px;padding:8px 10px;background:rgba(255,144,64,0.06);border:1px solid rgba(255,144,64,0.2);border-radius:3px;font-size:11px;color:#ff9040;line-height:1.5">
+        ⚠️ ${feeTokens.map(t => '<strong>' + t.symbol + '</strong> (' + formatFeePct(t._feeBps) + ')').join(', ')} — vault receives less due to transfer fee
+      </div>`
     : '';
-  const msg = '🔐 Deposit All Assets\n\n'
-    + 'This will deposit ' + tokens.length + ' asset(s) from your wallet into the GHOST vault:\n'
-    + tokens.map(t => '  • ' + t.symbol + ': ' + t.balance.toLocaleString(undefined,{maximumFractionDigits:6})).join('\n')
-    + feeWarning
-    + '\n\n⚠️ Make sure you trust ALL tokens in your wallet. Malicious tokens with hidden extensions could pose risks.'
-    + '\n\nProceed?';
-  if (!confirm(msg)) return;
+
+  const html = `
+    <div style="font-size:12px;color:#c0bce0;margin-bottom:10px">Depositing <strong style="color:#e0ddf0">${tokens.length} asset${tokens.length>1?'s':''}</strong> into the GHOST vault:</div>
+    <div style="max-height:180px;overflow-y:auto;margin-bottom:12px;padding:4px 0">${tokenRows}</div>
+    ${feeWarning}
+    <div style="margin-top:12px;padding:8px 10px;background:rgba(255,51,102,0.05);border:1px solid rgba(255,51,102,0.15);border-radius:3px;font-size:11px;color:#ff6688;line-height:1.5">
+      🔒 Make sure you trust <strong>all tokens</strong> in your wallet. Malicious tokens with hidden extensions could pose risks.
+    </div>`;
+
+  const ok = await ghostConfirm({ icon:'📥', title:'Deposit All Assets', html, okLabel:'DEPOSIT ALL' });
+  if (!ok) return;
   dbDepositAll();
 }
 
@@ -10888,7 +10908,7 @@ async function dbAbandon(skipConfirm, onChain, wasExecuted) {
 
 <!-- ─── GHOST CONFIRM MODAL (must be last in DOM to beat dashboard stacking context) ── -->
 <div id="ghostConfirmModal" onclick="if(event.target===this)_ghostConfirmReject()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:999999;justify-content:center;align-items:center;backdrop-filter:blur(5px)">
-  <div style="background:#0d0d1a;border:1px solid rgba(102,51,255,0.45);max-width:400px;width:90%;padding:40px 36px;position:relative">
+  <div style="background:#0d0d1a;border:1px solid rgba(102,51,255,0.45);max-width:440px;width:92%;padding:40px 36px;position:relative">
     <div id="ghostConfirmIcon" style="font-size:30px;margin-bottom:14px;text-align:center;line-height:1"></div>
     <h3 id="ghostConfirmTitle" style="margin-bottom:10px;font-size:20px;font-family:'Syne',sans-serif;color:#f0f0f8;font-weight:700"></h3>
     <p id="ghostConfirmMsg" style="margin-bottom:28px;font-size:13px;line-height:1.6;color:#c0bce0;font-family:'Share Tech Mono',monospace"></p>
