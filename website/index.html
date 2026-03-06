@@ -7262,10 +7262,20 @@ async function guardianWithdrawAll(ownerAddress) {
         try {
           const { blockhash } = await connection.getLatestBlockhash();
           const tx = new Transaction({ recentBlockhash: blockhash, feePayer: recoveryWalletPk });
+          let extraKp = null; // keypair for manual token account creation
 
+          // If recipient doesn't have a token account for this mint, create one manually
+          // Using buildManualTokenAccountIxs instead of createATAInstruction — the ATA program's
+          // CreateIdempotent fails with ProgramAccountNotFound for Token-2022 mints in guardian context
+          let receiveAcct = item.recipientAta;
           if (item.needsAta) {
-            console.log('[Ghost] Guardian: creating ATA for', item.mintPk.toBase58().slice(0,8), 'prog:', item.tokenProgPk.toBase58().slice(0,8));
-            tx.add(createATAInstruction(recoveryWalletPk, item.recipientAta, recoveryWalletPk, item.mintPk, item.tokenProgPk));
+            const { createIx, initIx, kp } = await buildManualTokenAccountIxs(
+              recoveryWalletPk, item.mintPk, recoveryWalletPk, item.tokenProgPk, connection
+            );
+            tx.add(createIx, initIx);
+            receiveAcct = kp.publicKey;
+            extraKp = kp;
+            console.log('[Ghost] Guardian: manual token account for', item.mintPk.toBase58().slice(0,8), '→', receiveAcct.toBase58().slice(0,8));
           }
 
           let adjAmount = item.rawAmount;
@@ -7277,7 +7287,7 @@ async function guardianWithdrawAll(ownerAddress) {
           txData.set(disc, 0);
           txData.set(new Uint8Array(amtBuf), 8);
 
-          console.log('[Ghost] Guardian ix:', item.mintPk.toBase58().slice(0,8), 'vault:', item.vaultTokenAcct.toBase58().slice(0,8), 'recv:', item.recipientAta.toBase58().slice(0,8), 'prog:', item.tokenProgPk.toBase58().slice(0,8), 'amt:', adjAmount.toString());
+          console.log('[Ghost] Guardian ix:', item.mintPk.toBase58().slice(0,8), 'vault:', item.vaultTokenAcct.toBase58().slice(0,8), 'recv:', receiveAcct.toBase58().slice(0,8), 'prog:', item.tokenProgPk.toBase58().slice(0,8), 'amt:', adjAmount.toString());
           tx.add(new TransactionInstruction({ programId, keys: [
             { pubkey: ghostPda,             isSigner: false, isWritable: true  },
             { pubkey: ownerPk,              isSigner: false, isWritable: false },
@@ -7285,26 +7295,23 @@ async function guardianWithdrawAll(ownerAddress) {
             { pubkey: recoveryWalletPk,     isSigner: true,  isWritable: true  },
             { pubkey: item.mintPk,          isSigner: false, isWritable: false },
             { pubkey: item.vaultTokenAcct,  isSigner: false, isWritable: true  },
-            { pubkey: item.recipientAta,    isSigner: false, isWritable: true  },
+            { pubkey: receiveAcct,          isSigner: false, isWritable: true  },
             { pubkey: item.tokenProgPk,     isSigner: false, isWritable: false },
           ], data: txData }));
-
-          // Simulate first to get detailed logs on failure
-          try {
-            const simResult = await connection.simulateTransaction(tx);
-            if (simResult.value.err) {
-              console.error('[Ghost] Guardian sim FAILED for', item.info.mint?.slice(0,8), ':', JSON.stringify(simResult.value.err), 'logs:', simResult.value.logs);
-              showNotif('⚠️ Withdraw failed for ' + (item.info.symbol || item.info.mint?.slice(0,6)) + ': ' + JSON.stringify(simResult.value.err), 'error');
-              continue; // skip this token, try next
-            }
-          } catch(simErr) {
-            console.error('[Ghost] Guardian sim error:', simErr.message);
-          }
 
           const symLabel = item.info.symbol || item.info.mint?.slice(0,6);
           showNotif('Sign to withdraw ' + symLabel + '...', '');
           const signed = await ghostState.provider.signTransaction(tx);
-          const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' });
+          if (extraKp) signed.partialSign(extraKp);
+          let sig;
+          try {
+            sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' });
+          } catch(simErr) {
+            let logs = []; try { logs = await simErr.getLogs?.(connection); } catch(_) {}
+            console.error('[Ghost] Guardian tx error for', symLabel, ':', simErr.message, 'logs:', logs);
+            showNotif('⚠️ Failed: ' + symLabel + ' — ' + (simErr.message||'').slice(0,80), 'error');
+            continue;
+          }
           const conf = await connection.confirmTransaction(sig, 'confirmed');
           if (conf.value?.err) { console.error('[Ghost] Guardian tx err:', conf.value.err); continue; }
 
@@ -7314,7 +7321,7 @@ async function guardianWithdrawAll(ownerAddress) {
           successCount++;
         } catch(tokenErr) {
           console.error('[Ghost] Guardian withdraw failed for', item.info.mint?.slice(0,8), ':', tokenErr.message || tokenErr);
-          showNotif('⚠️ Failed: ' + (item.info.symbol || item.info.mint?.slice(0,6)) + ' — ' + (tokenErr.message||tokenErr).slice(0,80), 'error');
+          showNotif('⚠️ Failed: ' + (item.info.symbol || item.info.mint?.slice(0,6)) + ' — ' + (tokenErr.message||tokenErr).toString().slice(0,80), 'error');
         }
       }
     }
