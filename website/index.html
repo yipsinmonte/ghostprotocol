@@ -1240,7 +1240,7 @@
             <label>Amount to Burn</label>
             <div style="display:flex;gap:8px;align-items:center">
               <input type="number" id="burnAmount" placeholder="0" style="flex:1">
-              <button class="db-btn db-btn-outline" style="padding:7px 10px;font-size:11px;flex-shrink:0" onclick="(function(){const t=ghostState.selectedTokens.burn;if(t&&t.mint!=='whole-vault-burn'){const vt=ghostState.vaultTokens.find(v=>v.mint===t.mint||v.symbol===t.symbol);if(vt){var dec=vt.decimals||6;document.getElementById('burnAmount').value=Math.floor(vt.balance*Math.pow(10,dec))/Math.pow(10,dec);}}})()" type="button">MAX</button>
+              <button class="db-btn db-btn-outline" style="padding:7px 10px;font-size:11px;flex-shrink:0" onclick="(function(){const t=ghostState.selectedTokens.burn;if(t&&t.mint!=='whole-vault-burn'){const vt=ghostState.vaultTokens.find(v=>v.mint===t.mint||v.symbol===t.symbol);if(vt){var dec=vt.decimals||6;var sel=ghostState.selectedTokens.burn;var tBal=sel?sel.balance:vt.balance;var vtF=Math.floor(vt.balance*Math.pow(10,dec))/Math.pow(10,dec);var tF=Math.floor(tBal*Math.pow(10,dec))/Math.pow(10,dec);document.getElementById('burnAmount').value=Math.min(vtF,tF);}}})()" type="button">MAX</button>
             </div>
           </div>
           <button class="db-btn db-btn-danger" id="addBurnBtn" onclick="dbAddBeneficiary('burn')">🔥 Add Burn Instruction</button>
@@ -6502,6 +6502,18 @@ async function dbRemoveBeneficiary(index, _silent) {
 }
 
 // ─── Bene amount helpers ────────────────────────────────────
+// Get the transferable balance for a vault token, accounting for withheld fees.
+// Uses the cached _transferFeeCache to avoid extra RPC calls.
+function getTransferableBalance(vt) {
+  if (!vt) return 0;
+  const feeBps = _transferFeeCache[vt.mint] || 0;
+  // If no fee, balance is fully transferable
+  if (!feeBps) return vt.balance;
+  // For fee tokens, the vault scan already subtracted withheld amount.
+  // But vt.balance might be stale from a rescan. Use the stored value directly.
+  return vt.balance;
+}
+
 function updateBeneRemaining() {
   const t = ghostState.selectedTokens.bene;
   const lbl = document.getElementById('beneRemainingLabel');
@@ -6525,12 +6537,14 @@ function fillMaxBene() {
   const assigned = ghostState.ghost.beneficiaries
     .filter(b => b.token === t.symbol && b.action !== 'whole-vault-share')
     .reduce((s, b) => s + b.amount, 0);
-  // Use the minimum of live vault balance and picker-displayed balance to avoid exceeding what user sees
-  const effectiveBal = Math.min(vt.balance, t.balance || vt.balance);
-  const rem = Math.max(0, effectiveBal - assigned);
-  // Round to token's decimal precision to avoid fractional artifacts
   const dec = vt.decimals ?? 6;
+  // Floor both sources to token precision, then take the minimum
+  const vtFloor = Math.floor(vt.balance * Math.pow(10, dec)) / Math.pow(10, dec);
+  const tFloor = Math.floor((t.balance || vt.balance) * Math.pow(10, dec)) / Math.pow(10, dec);
+  const effectiveBal = Math.min(vtFloor, tFloor);
+  const rem = Math.max(0, effectiveBal - assigned);
   const rounded = Math.floor(rem * Math.pow(10, dec)) / Math.pow(10, dec);
+  console.log('[Ghost] fillMaxBene:', t.symbol, 'vt.balance:', vt.balance, 'vtFloor:', vtFloor, 't.balance:', t.balance, 'tFloor:', tFloor, 'assigned:', assigned, 'result:', rounded);
   document.getElementById('newAmount').value = rounded;
   updateBeneRemaining();
 }
