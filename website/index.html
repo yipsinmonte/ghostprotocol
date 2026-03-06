@@ -7057,28 +7057,59 @@ async function scanGuardianAssignments() {
         const intervalStr = _fmtDHM(interval);
         const graceStr = awakened && !executed ? _fmtDHM(graceLeftSecs) : _fmtDHM(remainingSeconds);
 
+        // Progress bar percentages
+        const hbPct = interval > 0 ? Math.min(100, (silenceSeconds / interval) * 100) : 0;
+        const gracePct = (awakened && grace > 0) ? Math.min(100, 100 - (graceLeftSecs / grace) * 100) : 0;
+        const hbBarColor = hbPct > 80 ? '#ff3366' : hbPct > 50 ? '#ffaa33' : '#6633ff';
+
         cards.push(`
           <div style="background:#07070f;border:1px solid ${awakened?'rgba(255,170,51,0.35)':'rgba(102,51,255,0.2)'};padding:20px 22px;margin-bottom:12px" data-owner="${ownerB58}" data-awakened="${awakened}" data-executed="${executed}">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
               <div>
-                <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--muted);letter-spacing:0.15em;margin-bottom:4px">SOUL</div>
-                <div style="font-family:'Share Tech Mono',monospace;font-size:13px;color:#e0ddf0">${ownerB58.slice(0,8)}...${ownerB58.slice(-6)}</div>
+                <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.2em;color:#8080a0;margin-bottom:4px">SOUL</div>
+                <div style="font-family:'Share Tech Mono',monospace;font-size:14px;color:#e0ddf0">${ownerB58.slice(0,8)}...${ownerB58.slice(-6)}</div>
               </div>
               <div style="text-align:right">
-                <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--muted);letter-spacing:0.15em;margin-bottom:4px">STATUS</div>
-                <div style="font-family:'Share Tech Mono',monospace;font-size:13px;color:${statusColor}">${statusText}</div>
+                <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.2em;color:#8080a0;margin-bottom:4px">STATUS</div>
+                <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:15px;color:${statusColor}">${statusText}</div>
               </div>
             </div>
-            <div style="display:flex;gap:24px;font-family:'Share Tech Mono',monospace;font-size:12px;color:#9090a8;margin-bottom:14px">
-              <span>last ping: <span style="color:#c0bce0">${lastPingStr}</span></span>
-              <span>Interval: <span style="color:#c0bce0">${intervalStr}</span></span>
-              ${awakened&&!executed ? `<span>Grace left: <span style="color:#ffaa33">${graceStr}</span></span>` : `<span>Time left: <span style="color:#c0bce0">${graceStr}</span></span>`}
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">
+              <div style="background:rgba(102,51,255,0.04);border:1px solid rgba(102,51,255,0.12);padding:8px 10px">
+                <div style="font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.15em;color:#8080a0;margin-bottom:3px">LAST PING</div>
+                <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:#e0ddf0">${lastPingStr}</div>
+              </div>
+              <div style="background:rgba(102,51,255,0.04);border:1px solid rgba(102,51,255,0.12);padding:8px 10px">
+                <div style="font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.15em;color:#8080a0;margin-bottom:3px">INTERVAL</div>
+                <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:#e0ddf0">${intervalStr}</div>
+              </div>
+              <div style="background:rgba(102,51,255,0.04);border:1px solid rgba(102,51,255,0.12);padding:8px 10px">
+                <div style="font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.15em;color:#8080a0;margin-bottom:3px">${awakened&&!executed ? 'GRACE LEFT' : 'TIME LEFT'}</div>
+                <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:${awakened&&!executed ? '#ffaa33' : '#e0ddf0'}">${graceStr}</div>
+              </div>
             </div>
             ${!executed ? `
+            <div style="margin-bottom:10px">
+              <div style="display:flex;justify-content:space-between;font-family:'Share Tech Mono',monospace;font-size:9px;color:#8080a0;margin-bottom:3px">
+                <span>Heartbeat</span><span style="color:${hbBarColor}">${hbPct.toFixed(0)}%</span>
+              </div>
+              <div style="height:4px;background:rgba(102,51,255,0.08);border-radius:2px;overflow:hidden">
+                <div style="height:100%;width:${hbPct}%;background:${hbBarColor};border-radius:2px"></div>
+              </div>
+            </div>
+            ${awakened ? `
+            <div style="margin-bottom:14px">
+              <div style="display:flex;justify-content:space-between;font-family:'Share Tech Mono',monospace;font-size:9px;color:#8080a0;margin-bottom:3px">
+                <span>Grace Period</span><span style="color:#ffaa33">${gracePct.toFixed(0)}% elapsed</span>
+              </div>
+              <div style="height:4px;background:rgba(255,170,51,0.08);border-radius:2px;overflow:hidden">
+                <div style="height:100%;width:${gracePct}%;background:#ffaa33;border-radius:2px"></div>
+              </div>
+            </div>` : ''}
             <div style="display:flex;gap:8px;padding-top:14px;border-top:1px solid rgba(102,51,255,0.12)">
               ${inGrace
-                ? `<button class="db-btn" style="flex:1;border-color:#ffaa33;color:#ffaa33;padding:10px" onclick="guardianCancelAwakening('${ownerB58}')">🛑 Cancel Awakening</button>`
-                : `<button class="db-btn" style="flex:1;border-color:#555;color:#666;padding:10px;cursor:not-allowed;opacity:0.4" disabled title="Ghost is not in grace period">🛑 Cancel Awakening</button>`
+                ? `<button class="db-btn" style="flex:1;background:rgba(255,60,60,0.08);border-color:rgba(255,80,80,0.4);color:#ff6666;padding:10px;font-weight:600;box-shadow:0 0 12px rgba(255,60,60,0.1)" onclick="guardianCancelAwakening('${ownerB58}')">🛑 Cancel Awakening</button>`
+                : `<button class="db-btn" style="flex:1;background:rgba(60,60,80,0.15);border-color:rgba(80,80,100,0.25);color:#50506a;padding:10px;cursor:not-allowed;opacity:0.5" disabled title="Ghost is not in grace period">🛑 Cancel Awakening</button>`
               }
               <button class="db-btn" style="flex:1;background:rgba(0,220,170,0.1);border-color:rgba(0,220,170,0.55);color:#80ffd8;padding:10px;font-weight:600;box-shadow:0 0 12px rgba(0,200,150,0.15)" onclick="guardianWithdrawAll('${ownerB58}')">📤 Withdraw Vault</button>
             </div>` : `
@@ -7655,7 +7686,7 @@ function createATAInstruction(payer, ata, owner, mint, tokenProgram) {
   return new solanaWeb3.TransactionInstruction({
     programId: ASSOC_TOKEN_PROGRAM_ID_PK(),
     keys,
-    data: new Uint8Array([1]) // CreateIdempotent — safe if account exists, works for Token-2022
+    data: new Uint8Array([1]) // CreateIdempotent — works for both SPL and Token-2022
   });
 }
 
