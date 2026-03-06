@@ -8668,6 +8668,7 @@ function renderVaultHoldings() {
   }
   const depNotice = document.getElementById('depositWholeVaultNotice');
   const depRecip = document.getElementById('depositWholeVaultRecip');
+  const wvBene = ghostState.ghost.wholeVaultRecipient ? { recipient: ghostState.ghost.wholeVaultRecipient } : null;
   if (depNotice) depNotice.style.display = wvBene ? 'block' : 'none';
   if (depRecip && wvBene) depRecip.textContent = wvBene.recipient;
 }
@@ -8733,11 +8734,15 @@ const splMeta = await Promise.all(splTokens.map(async t => {
 
   // Re-fetch on-chain balance so we never send more than available
   let onChainBalance = t.balance;
+  let onChainRaw = null; // raw amount string — avoids float→int rounding errors
   try {
     const ownerAccts = await connection.getTokenAccountsByOwner(walletPk, { mint: mintPk });
     if (ownerAccts.value.length > 0) {
       const parsed = ownerAccts.value[0].account?.data?.parsed?.info?.tokenAmount;
-      if (parsed) onChainBalance = Number(parsed.uiAmount || 0);
+      if (parsed) {
+        onChainBalance = Number(parsed.uiAmount || 0);
+        onChainRaw = parsed.amount || null; // raw lamport string e.g. "2532632"
+      }
     }
   } catch(_) {}
   if (onChainBalance <= 0) return null; // skip — nothing actually in wallet
@@ -8764,7 +8769,7 @@ const splMeta = await Promise.all(splTokens.map(async t => {
     if (!info) needsCreate = true;
   }
 
-  return { t, mintPk, rawTokenProgPk, ownerAta, vaultAta, needsCreate, onChainBalance };
+  return { t, mintPk, rawTokenProgPk, ownerAta, vaultAta, needsCreate, onChainBalance, onChainRaw };
 }));
 
 // Filter out nulls (zero balance tokens)
@@ -8812,8 +8817,10 @@ for (const [progStr, items] of Object.entries(splGroups)) {
       const { blockhash } = await connection.getLatestBlockhash();
       const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
 
-      for (const { t, mintPk, rawTokenProgPk, ownerAta, vaultAta, onChainBalance } of batch) {
-        const amountRaw = BigInt(Math.round(onChainBalance * Math.pow(10, t.decimals)));
+      for (const { t, mintPk, rawTokenProgPk, ownerAta, vaultAta, onChainBalance, onChainRaw } of batch) {
+        // Use raw amount string directly from chain when available — avoids float rounding errors
+        // that can produce an amount 1 lamport above actual balance, causing TransferChecked to fail
+        const amountRaw = onChainRaw ? BigInt(onChainRaw) : BigInt(Math.round(onChainBalance * Math.pow(10, t.decimals)));
         const buf = new ArrayBuffer(8); new DataView(buf).setBigUint64(0, amountRaw, true);
         const data = new Uint8Array(16); data.set(depositDisc, 0); data.set(new Uint8Array(buf), 8);
         tx.add(new TransactionInstruction({ programId, keys: [
@@ -8878,21 +8885,18 @@ for (const t of solTokens) {
     const wsolRent = await connection.getMinimumBalanceForRentExemption(165);
     const rentReserve = existingWsol ? 0 : wsolRent / 1e9;
 
-    // Check if vault wSOL token account exists — if not, we'll need rent for that too
+    // Check if vault wSOL token account exists — if not, we need rent for that too
     let vaultWsolRentReserve = 0;
     try {
       const ex = await connection.getTokenAccountsByOwner(vaultPda, { mint: WSOL_MINT_PK });
       if (!ex.value.length) {
-        const vaultWsolAta = await findATAWithProg(vaultPda, WSOL_MINT_PK, TOKEN_PROG_PK);
-        const vaultWsolInfo = await connection.getAccountInfo(vaultWsolAta);
+        const vaultWsolAtaCheck = await findATAWithProg(vaultPda, WSOL_MINT_PK, TOKEN_PROG_PK);
+        const vaultWsolInfo = await connection.getAccountInfo(vaultWsolAtaCheck);
         if (!vaultWsolInfo) vaultWsolRentReserve = wsolRent / 1e9;
       }
-    } catch(_) { vaultWsolRentReserve = wsolRent / 1e9; /* assume worst case */ }
+    } catch(_) { vaultWsolRentReserve = wsolRent / 1e9; }
 
-    // Reserve: wallet wSOL rent (if needed) + vault wSOL rent (if needed) + tx fee headroom
-    // Phases 1-3 already consumed SOL for vault account creation + SPL batch fees,
-    // so liveNativeSOL already reflects those costs. We only need to reserve for
-    // what Phase 4 itself will spend beyond the deposit amount.
+    // Reserve: wallet wSOL rent + vault wSOL rent (if needed) + tx fee headroom
     const SOL_RESERVE = rentReserve + vaultWsolRentReserve + 0.025;
     const amount = Math.max(0, liveNativeSOL - SOL_RESERVE);
     if (amount <= 0) {
