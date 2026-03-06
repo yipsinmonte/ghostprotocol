@@ -8907,20 +8907,30 @@ async function confirmDepositAll() {
   if (tokens.length === 0) { showNotif('No assets with balance in wallet', 'error'); return; }
   const feeTokens = tokens.filter(t => t._feeBps && t._feeBps > 0);
 
-  // Build styled token list HTML
+  // Build styled token list HTML with logos
   const tokenRows = tokens.map(t => {
+    const logo = tokenLogoEl(t.symbol, 24, t.logoUrl || null);
     const feeTag = t._feeBps && t._feeBps > 0
-      ? `<span style="color:#ff9040;font-size:10px;margin-left:6px">${formatFeePct(t._feeBps)} fee</span>`
+      ? `<span style="font-size:9px;color:#ff9040;background:rgba(255,144,64,0.1);border:1px solid rgba(255,144,64,0.2);padding:1px 5px;border-radius:2px;margin-left:6px">${formatFeePct(t._feeBps)} fee</span>`
       : '';
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(102,51,255,0.08)">
-      <span style="color:#e0ddf0">${t.symbol}${feeTag}</span>
-      <span style="color:#c0bce0">${t.balance.toLocaleString(undefined,{maximumFractionDigits:6})}</span>
+    const feeNote = t._feeBps && t._feeBps > 0
+      ? `<div style="font-size:10px;color:#ff9040;padding-left:32px;margin-top:2px">↳ vault receives ~${(100 - t._feeBps/100).toFixed(1)}% after transfer fee</div>`
+      : '';
+    return `<div style="padding:7px 0;border-bottom:1px solid rgba(102,51,255,0.08)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="flex-shrink:0">${logo}</div>
+        <div style="flex:1;min-width:0">
+          <span style="color:#e0ddf0;font-size:12px">${t.symbol}${feeTag}</span>
+        </div>
+        <span style="color:#c0bce0;font-size:12px;white-space:nowrap">${t.balance.toLocaleString(undefined,{maximumFractionDigits:6})}</span>
+      </div>
+      ${feeNote}
     </div>`;
   }).join('');
 
   const feeWarning = feeTokens.length > 0
     ? `<div style="margin-top:12px;padding:8px 10px;background:rgba(255,144,64,0.06);border:1px solid rgba(255,144,64,0.2);border-radius:3px;font-size:11px;color:#ff9040;line-height:1.5">
-        ⚠️ ${feeTokens.map(t => '<strong>' + t.symbol + '</strong> (' + formatFeePct(t._feeBps) + ')').join(', ')} — vault receives less due to transfer fee
+        ⚠️ ${feeTokens.map(t => '<strong>' + t.symbol + '</strong> (' + formatFeePct(t._feeBps) + ')').join(', ')} — transfer fee deducted on deposit
       </div>`
     : '';
 
