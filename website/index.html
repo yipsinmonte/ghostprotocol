@@ -7693,10 +7693,19 @@ async function loadWalletTokens() {
 
     // Always use fresh on-chain balances as source of truth
     // Preserve logos/names fetched this session, but never keep stale balances
+    // Exception: tokens recently deposited are protected for 15s — stale RPC would restore
+    // their balance and re-show them in the deposit dropdown
+    const _refreshNow = Date.now();
     for (const fresh of freshTokens) {
       const existing = ghostState.walletTokens.find(t => t.mint === fresh.mint);
       if (existing) {
-        existing.balance = fresh.balance; // always update from chain
+        if (existing._recentlyDeposited && (_refreshNow - existing._recentlyDeposited) < 15000) {
+          // Skip balance update — chain likely stale, keep the zero we set on deposit
+          // UNLESS chain shows a LOWER balance (meaning it caught up)
+          if (fresh.balance < existing.balance || existing.balance === 0) continue;
+        }
+        delete existing._recentlyDeposited; // clear flag once chain has caught up
+        existing.balance = fresh.balance;
         existing.symbol = fresh.symbol || existing.symbol;
         if (fresh.logoUrl) existing.logoUrl = fresh.logoUrl;
       }
@@ -7711,16 +7720,6 @@ async function loadWalletTokens() {
     ghostState.walletTokens = ghostState.walletTokens.filter(t =>
       freshTokens.find(f => f.mint === t.mint) || t._sessionOnly
     );
-    // Dedup walletTokens by mint — prevents dropdown showing same token twice
-    const _wSeen = new Map();
-    for (const wt of ghostState.walletTokens) {
-      const ex = _wSeen.get(wt.mint);
-      if (!ex || wt.balance > ex.balance) _wSeen.set(wt.mint, wt);
-    }
-    if (_wSeen.size < ghostState.walletTokens.length) {
-      console.warn('[Ghost] Wallet dedup: removed', ghostState.walletTokens.length - _wSeen.size, 'duplicate(s)');
-      ghostState.walletTokens = [..._wSeen.values()];
-    }
     if (ghostState.walletTokens.length === freshTokens.length) {
       // Only refetch if there are tokens without prices/logos yet
       const needsFetch = ghostState.walletTokens.some(t => !pumpFunFetched.has(t.mint) || !priceFetched.has(t.mint));
@@ -7834,14 +7833,10 @@ async function loadWalletTokens() {
           const _hasWithdrawn = ghostState._withdrawnMints.size > 0;
           if (_chainHasData || !_chainHasAccts || _allZero || _hasWithdrawn) { // safe to merge/prune
             // Merge: preserve logos/names from existing entries, update balances from chain
-            // Exception: don't overwrite balance for tokens with _pendingDeposit — chain may be stale
             for (const fresh of freshVault) {
               const existing = ghostState.vaultTokens.find(v => v.mint === fresh.mint);
               if (existing) {
-                // Only update balance from chain if NOT a recent deposit (avoids stale RPC overwriting in-memory deposit)
-                if (!existing._pendingDeposit || fresh.balance >= existing.balance) {
-                  existing.balance = fresh.balance;
-                }
+                existing.balance = fresh.balance;
                 if (fresh.logoUrl) existing.logoUrl = fresh.logoUrl;
               } else {
                 ghostState.vaultTokens.push(fresh);
@@ -7861,34 +7856,10 @@ async function loadWalletTokens() {
             ghostState.vaultTokens.forEach(v => {
               if (v._pendingDeposit && freshVault.find(f => f.mint === v.mint)) delete v._pendingDeposit;
             });
-            // Dedup by mint — keeps the entry with higher balance if duplicates exist
-            const _deduped = new Map();
-            for (const v of ghostState.vaultTokens) {
-              const existing = _deduped.get(v.mint);
-              if (!existing || v.balance > existing.balance) _deduped.set(v.mint, v);
-            }
-            if (_deduped.size < ghostState.vaultTokens.length) {
-              console.warn('[Ghost] Vault dedup: removed', ghostState.vaultTokens.length - _deduped.size, 'duplicate entries');
-              ghostState.vaultTokens = [..._deduped.values()];
-            }
-            // Clear _withdrawnMints only when the on-chain account is confirmed empty or absent.
-            // We check against the RAW vaultAccts (pre-filter), not freshVault (which excluded withdrawn mints).
-            // This prevents the one-cycle flicker where withdrawn tokens briefly reappear.
+            // Clear _withdrawnMints for mints now confirmed absent from chain
             let _withdrawnChanged = false;
             for (const wm of ghostState._withdrawnMints) {
-              // Find the raw vault account for this mint
-              const wmNorm = wm === 'native' ? 'So11111111111111111111111111111111111111112' : wm;
-              const rawAcct = vaultAccts.find(a => {
-                const m = a.account?.data?.parsed?.info?.mint;
-                return m === wm || m === wmNorm;
-              });
-              // Clear if: no account found on chain, OR account has zero balance
-              if (!rawAcct) {
-                ghostState._withdrawnMints.delete(wm); _withdrawnChanged = true;
-              } else {
-                const rawBal = BigInt(rawAcct.account?.data?.parsed?.info?.tokenAmount?.amount || '0');
-                if (rawBal <= 0n) { ghostState._withdrawnMints.delete(wm); _withdrawnChanged = true; }
-              }
+              if (!freshVault.find(f => f.mint === wm)) { ghostState._withdrawnMints.delete(wm); _withdrawnChanged = true; }
             }
             if (_withdrawnChanged) _saveWithdrawnMints();
             const vaultOnlyMints = freshVault
@@ -8770,14 +8741,9 @@ if (!vaultPdaInfo || vaultPdaInfo.lamports === 0) {
 const splMeta = await Promise.all(splTokens.map(async t => {
   const mintPk = new PublicKey(effectiveMint(t.mint));
 
-  // ⚠️  PROVEN WORKING — DO NOT CHANGE THIS APPROACH ⚠️
-  // Re-fetch on-chain balance AND account pubkey using raw RPC with jsonParsed encoding.
-  // web3.js connection.getTokenAccountsByOwner() does NOT support { encoding: 'jsonParsed' }
-  // as a third arg — it throws StructError and silently falls back to a derived ATA that
-  // may not exist on-chain, causing AccountNotInitialized errors.
-  // Raw fetch() with jsonParsed in the RPC params is the ONLY reliable method.
-  // This also gives us the raw integer amount string (onChainRaw) so we avoid float→BigInt
-  // rounding that caused TransferChecked: insufficient funds for pippin deposits.
+  // Re-fetch on-chain balance AND account pubkey using raw RPC with jsonParsed encoding
+  // web3.js getTokenAccountsByOwner doesn't reliably support { encoding: 'jsonParsed' }
+  // so we use raw fetch (same pattern as loadWalletTokens)
   let onChainBalance = t.balance;
   let onChainRaw = null;
   let ownerAtaFromChain = null;
@@ -8928,6 +8894,7 @@ for (const [progStr, items] of Object.entries(splGroups)) {
           ghostState.vaultTokens.push({ symbol: t.symbol, mint: vaultMint, balance: amount, decimals: t.decimals, logoUrl: t.logoUrl||null, _pendingDeposit: Date.now() });
         }
         t.balance = 0;
+        t._recentlyDeposited = Date.now(); // protect from stale RPC restoring balance
         addActivityRow('Vault Deposit ' + amount.toLocaleString() + ' ' + t.symbol, sig.slice(0,4)+'...'+sig.slice(-4), 'deposit');
         successCount++;
       }
@@ -9069,6 +9036,7 @@ for (const t of solTokens) {
     if (existing) { existing.balance += totalDepositedSOL; existing.mint = 'native'; }
     else { ghostState.vaultTokens.push({ symbol: 'SOL', mint: 'native', balance: totalDepositedSOL, decimals: 9, logoUrl: null, _pendingDeposit: Date.now() }); }
     t.balance = 0;
+    t._recentlyDeposited = Date.now();
     addActivityRow('Vault Deposit ' + totalDepositedSOL.toLocaleString() + ' SOL', depSig.slice(0,4)+'...'+depSig.slice(-4), 'deposit');
     successCount++;
   } catch(err) { console.error('SOL deposit error:', err); showNotif('SOL deposit failed: ' + (err.message || err), 'error'); }
@@ -9115,7 +9083,7 @@ const splTokens = tokens.filter(vt => vt.mint !== WSOL_MINT_PK_STR && vt.mint !=
 if (isDemo) {
 for (const vt of tokens) {
 const wt = ghostState.walletTokens.find(w => w.mint === vt.mint);
-if (wt) { wt.balance += vt.balance; } else { ghostState.walletTokens.push({ symbol: vt.symbol, mint: vt.mint, balance: vt.balance, decimals: vt.decimals, logoUrl: vt.logoUrl||null }); }
+if (wt) { delete wt._recentlyDeposited; wt.balance += vt.balance; } else { ghostState.walletTokens.push({ symbol: vt.symbol, mint: vt.mint, balance: vt.balance, decimals: vt.decimals, logoUrl: vt.logoUrl||null }); }
 successCount++;
 }
 ghostState.vaultTokens = [];
@@ -9168,7 +9136,7 @@ const conf = await connection.confirmTransaction(sig, 'confirmed');
 if (conf.value?.err) throw new Error('TX failed: ' + JSON.stringify(conf.value.err));
 for (const { vt } of batch) {
 const wt = ghostState.walletTokens.find(w => w.mint === vt.mint);
-if (wt) { wt.balance += vt.balance; } else { ghostState.walletTokens.push({ symbol: vt.symbol, mint: vt.mint, balance: vt.balance, decimals: vt.decimals, logoUrl: vt.logoUrl||null }); }
+if (wt) { delete wt._recentlyDeposited; wt.balance += vt.balance; } else { ghostState.walletTokens.push({ symbol: vt.symbol, mint: vt.mint, balance: vt.balance, decimals: vt.decimals, logoUrl: vt.logoUrl||null }); }
 const existing = ghostState.vaultTokens.find(v => v === vt);
 if (existing) existing._pendingWithdraw = true; // mark for prune on next chain fetch
 const idx = ghostState.vaultTokens.indexOf(vt); if (idx !== -1) ghostState.vaultTokens.splice(idx, 1);
@@ -9237,7 +9205,7 @@ throw new Error('TX failed: ' + simErr.message + (logs.slice(-5).length?' | '+lo
 const conf = await connection.confirmTransaction(sig, 'confirmed');
 if (conf.value?.err) throw new Error('TX failed: ' + JSON.stringify(conf.value.err));
 const wt = ghostState.walletTokens.find(w => w.mint === 'native');
-if (wt) { wt.balance += amount; } else { ghostState.walletTokens.push({ symbol: 'SOL', mint: 'native', balance: amount, decimals: 9, logoUrl: null }); }
+if (wt) { delete wt._recentlyDeposited; wt.balance += amount; } else { ghostState.walletTokens.push({ symbol: 'SOL', mint: 'native', balance: amount, decimals: 9, logoUrl: null }); }
 const idx = ghostState.vaultTokens.indexOf(vt); if (idx !== -1) ghostState.vaultTokens.splice(idx, 1);
 addActivityRow('Vault Withdrawal ' + amount.toLocaleString() + ' SOL', sig.slice(0,4)+'...'+sig.slice(-4), 'withdraw');
 successCount++;
@@ -9402,7 +9370,7 @@ for (let i = 0; i < allTxs.length; i++) {
       for (const { vt: bvt } of batch) {
         ghostState._withdrawnMints.add(bvt.mint); _saveWithdrawnMints();
         const wt = ghostState.walletTokens.find(w => w.mint === bvt.mint);
-        if (wt) { wt.balance += bvt.balance; } else { ghostState.walletTokens.push({ symbol: bvt.symbol, mint: bvt.mint, balance: bvt.balance, decimals: bvt.decimals, logoUrl: bvt.logoUrl||null }); }
+        if (wt) { delete wt._recentlyDeposited; wt.balance += bvt.balance; } else { ghostState.walletTokens.push({ symbol: bvt.symbol, mint: bvt.mint, balance: bvt.balance, decimals: bvt.decimals, logoUrl: bvt.logoUrl||null }); }
         const idx = ghostState.vaultTokens.indexOf(bvt); if (idx !== -1) ghostState.vaultTokens.splice(idx, 1);
         addActivityRow('Vault Withdrawal ' + bvt.balance.toLocaleString() + ' ' + bvt.symbol, sig.slice(0,4)+'...'+sig.slice(-4), 'withdraw');
         successCount++;
@@ -9410,7 +9378,7 @@ for (let i = 0; i < allTxs.length; i++) {
     } else {
       ghostState._withdrawnMints.add('native'); _saveWithdrawnMints();
       const wt = ghostState.walletTokens.find(w => w.mint === 'native');
-      if (wt) { wt.balance += amount; } else { ghostState.walletTokens.push({ symbol: 'SOL', mint: 'native', balance: amount, decimals: 9, logoUrl: null }); }
+      if (wt) { delete wt._recentlyDeposited; wt.balance += amount; } else { ghostState.walletTokens.push({ symbol: 'SOL', mint: 'native', balance: amount, decimals: 9, logoUrl: null }); }
       const idx = ghostState.vaultTokens.indexOf(vt); if (idx !== -1) ghostState.vaultTokens.splice(idx, 1);
       addActivityRow('Vault Withdrawal ' + amount.toLocaleString() + ' SOL', sig.slice(0,4)+'...'+sig.slice(-4), 'withdraw');
       successCount++;
@@ -9650,6 +9618,7 @@ async function dbDeposit() {
   // Helper: update UI state after successful deposit
   const _applyDeposit = () => {
     t.balance = Math.max(0, t.balance - amount);
+    if (t.balance === 0) t._recentlyDeposited = Date.now();
     const vaultMint = isSOL ? 'native' : mintStr;
     ghostState._withdrawnMints.delete(vaultMint);
     if (isSOL) ghostState._withdrawnMints.delete('So11111111111111111111111111111111111111112');
@@ -9946,6 +9915,7 @@ async function dbWithdrawAsset(mintKey) {
     const walletMint = isSOL ? 'native' : vt.mint;
     const wt = ghostState.walletTokens.find(w => w.mint === walletMint);
     if (wt) {
+      delete wt._recentlyDeposited;
       wt.balance += amount;
       const sel = ghostState.selectedTokens.deposit;
       if (sel && sel.mint === walletMint) {
