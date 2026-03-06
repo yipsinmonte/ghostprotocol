@@ -1118,9 +1118,10 @@
             </div>
             <div class="db-form-group"><label>Available in Wallet</label><input type="text" id="depositBalance" value="—" readonly style="color:#c0bce0"></div>
           </div>
+          <div id="depositFeeNotice" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(255,144,64,0.08);border:1px solid rgba(255,144,64,0.25);border-radius:4px;font-family:'Share Tech Mono',monospace;font-size:11px;color:#ff9040;line-height:1.5"></div>
           <div style="display:flex;gap:10px;flex-wrap:wrap">
             <button class="db-btn db-btn-primary" onclick="dbDeposit()">📥 Deposit to Vault</button>
-            <button class="db-btn db-btn-outline" onclick="dbDepositAll()" title="Deposit all wallet assets at max balance">📥 Deposit All Assets</button>
+            <button class="db-btn db-btn-outline" onclick="confirmDepositAll()" title="Deposit all wallet assets at max balance">📥 Deposit All Assets</button>
           </div>
           <div id="depositWholeVaultNotice" style="display:none;margin-top:12px;padding:10px 14px;background:rgba(102,51,255,0.07);border:1px solid rgba(160,128,255,0.25);font-family:'Share Tech Mono',monospace;font-size:11px;color:#c0a0ff;line-height:1.6">
             👻 <strong style="color:#e0d0ff">Heads up:</strong> Your vault is fully assigned to <span id="depositWholeVaultRecip" style="color:#fff"></span>. Any assets you deposit will be automatically included in their inheritance.
@@ -7412,7 +7413,7 @@ function buildPickerDropdown(pickerId, tokens, onSelect) {
     <div class="token-picker-option" data-mint="${t.mint}" onclick="selectToken('${pickerId}','${t.mint}')">
       <div class="tp-opt-icon" style="overflow:hidden;background:none">${tokenLogoEl(resolveDisplaySym(t), 32, t.logoUrl||null)}</div>
       <div class="tp-opt-info">
-        <div class="tp-opt-symbol">${resolveDisplaySym(t)}</div>
+        <div class="tp-opt-symbol">${resolveDisplaySym(t)}${t._feeBps ? ' <span style="font-size:10px;color:#ff9040;font-weight:normal;margin-left:4px">' + formatFeePct(t._feeBps) + ' fee</span>' : ''}</div>
         <div class="tp-opt-bal">${t.isWholeVault ? 'All tokens · proportional shares' : t.isWholeBurn ? 'Burns all vault tokens on execution' : t.balance.toLocaleString(undefined,{maximumFractionDigits:6}) + ' available'}</div>
       </div>
       <span class="tp-opt-check" data-check="${pickerId}-${t.mint}" style="display:none">✓</span>
@@ -7447,6 +7448,16 @@ function selectToken(pickerId, mintOrIdx) {
   // Side effects
   if (pickerId === 'deposit') {
     document.getElementById('depositBalance').value = t.balance.toLocaleString(undefined,{maximumFractionDigits:6}) + ' ' + resolveDisplaySym(t);
+    // Show transfer fee warning for Token-2022 fee tokens
+    const feeNotice = document.getElementById('depositFeeNotice');
+    if (feeNotice) {
+      if (t._feeBps && t._feeBps > 0) {
+        feeNotice.innerHTML = '⚠️ This token has a <strong style="color:#ff9040">' + formatFeePct(t._feeBps) + ' transfer fee</strong>. The vault will receive ' + formatFeePct(10000 - t._feeBps) + ' of the deposited amount.';
+        feeNotice.style.display = 'block';
+      } else {
+        feeNotice.style.display = 'none';
+      }
+    }
   }
   if (pickerId === 'bene') {
     const isWhole = t.mint === '__whole_vault__';
@@ -7686,6 +7697,16 @@ async function loadWalletTokens() {
       freshTokens.splice(freshTokens.indexOf(wsolEntry), 1); // remove separate wSOL entry
     }
 
+    // Fetch transfer fees for Token-2022 tokens (non-blocking, parallel)
+    const token22Mints = (spl22Data.result?.value || []).map(a => a.account?.data?.parsed?.info?.mint).filter(Boolean);
+    if (token22Mints.length > 0) {
+      await Promise.all(token22Mints.map(async mint => {
+        const bps = await getTransferFeeBps(mint);
+        const tok = freshTokens.find(t => t.mint === mint);
+        if (tok && bps > 0) tok._feeBps = bps;
+      }));
+    }
+
     // Fetch on-chain metadata for unknown mints (name + image)
     if (unknownMints.length > 0) {
       await fetchTokenMetadata(freshTokens, unknownMints);
@@ -7708,6 +7729,7 @@ async function loadWalletTokens() {
         existing.balance = fresh.balance;
         existing.symbol = fresh.symbol || existing.symbol;
         if (fresh.logoUrl) existing.logoUrl = fresh.logoUrl;
+        if (fresh._feeBps) existing._feeBps = fresh._feeBps;
       }
     }
     // Add any new tokens not previously seen
@@ -8618,19 +8640,31 @@ function renderVaultHoldings() {
 
     const canWd = !isFullyAssigned && free > 0;
     const wdMax = canWd ? free : 0;
+    // Check transfer fee from cache (populated during loadWalletTokens)
+    const _mintForFee = t.mint === 'native' ? null : effectiveMint(t.mint);
+    const _vaultFeeBps = _mintForFee ? (_transferFeeCache[_mintForFee] || 0) : 0;
+    // Adjust max withdraw for transfer fee — user receives less but tx succeeds
+    const wdMaxAdjusted = _vaultFeeBps > 0 ? +(wdMax * 10000 / (10000 + _vaultFeeBps)).toFixed(9) : wdMax;
+    const feeBadge = _vaultFeeBps > 0
+      ? `<span style="font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#ff9040;background:rgba(255,144,64,0.08);border:1px solid rgba(255,144,64,0.2);padding:2px 6px;margin-left:6px">${formatFeePct(_vaultFeeBps)} FEE</span>`
+      : '';
+    const feeWithdrawNote = _vaultFeeBps > 0 && canWd
+      ? `<div style="font-size:10px;color:#ff9040;margin-top:2px;font-family:'Share Tech Mono',monospace">${formatFeePct(_vaultFeeBps)} transfer fee on withdraw</div>`
+      : '';
 
     return `
     <div class="vault-asset-row" data-mint="${t.mint}" style="${isFullyAssigned ? 'opacity:0.78;background:rgba(160,128,255,0.025)' : ''}">
       <div class="vault-asset-icon" style="background:none;overflow:hidden" data-logo="${t.mint}">${tokenLogoEl(t.symbol, 36, t.logoUrl||null)}</div>
       <div class="vault-asset-info">
-        <div class="vault-asset-symbol" style="display:flex;align-items:center;gap:8px">${t.symbol}${badge}<button onclick="excludeVaultMint('${t.mint}')" title="Hide this token from vault" style="background:none;border:none;color:#50406a;font-size:10px;cursor:pointer;padding:1px 3px;font-family:'Share Tech Mono',monospace;line-height:1;flex-shrink:0" onmouseover="this.style.color='#ff6688'" onmouseout="this.style.color='#50406a'">✕ hide</button></div>
+        <div class="vault-asset-symbol" style="display:flex;align-items:center;gap:8px">${t.symbol}${feeBadge}${badge}<button onclick="excludeVaultMint('${t.mint}')" title="Hide this token from vault" style="background:none;border:none;color:#50406a;font-size:10px;cursor:pointer;padding:1px 3px;font-family:'Share Tech Mono',monospace;line-height:1;flex-shrink:0" onmouseover="this.style.color='#ff6688'" onmouseout="this.style.color='#50406a'">✕ hide</button></div>
         <div class="vault-asset-bal" data-bal="${t.mint}">${t.balance.toLocaleString(undefined,{maximumFractionDigits:6})} ${t.symbol} in vault${usdStr}${freeNote}</div>
+        ${feeWithdrawNote}
       </div>
       <div class="vault-asset-actions">
         ${canWd
-          ? `<input class="vault-asset-input" type="text" inputmode="decimal" id="wdAmt_${t.mint}" placeholder="Amount" oninput="formatWithdrawInput(this,${wdMax})">
+          ? `<input class="vault-asset-input" type="text" inputmode="decimal" id="wdAmt_${t.mint}" placeholder="Amount" oninput="formatWithdrawInput(this,${wdMaxAdjusted})">
              <button class="db-btn db-btn-outline" style="padding:7px 14px;font-size:11px" onclick="dbWithdrawAsset('${t.mint}')">Withdraw</button>
-             <button class="db-btn db-btn-outline" style="padding:7px 8px;font-size:11px" onclick="fillMaxWithdraw('wdAmt_${t.mint}',${wdMax})">MAX</button>`
+             <button class="db-btn db-btn-outline" style="padding:7px 8px;font-size:11px" onclick="fillMaxWithdraw('wdAmt_${t.mint}',${wdMaxAdjusted})">MAX</button>`
           : `<input class="vault-asset-input" type="text" inputmode="decimal" id="wdAmt_${t.mint}" placeholder="—" disabled style="opacity:0.3">
              <button class="db-btn db-btn-outline" style="padding:7px 14px;font-size:11px;opacity:0.3;cursor:not-allowed" disabled title="${isFullyAssigned ? 'Fully assigned to beneficiaries — remove the beneficiary first to withdraw' : 'No free balance'}">Withdraw</button>
              <button class="db-btn db-btn-outline" style="padding:7px 8px;font-size:11px;opacity:0.3;cursor:not-allowed" disabled>MAX</button>`
@@ -8683,6 +8717,23 @@ function renderVaultHoldings() {
 }
 
 // ─── Bulk deposit / withdraw ────────────────────────────────────
+function confirmDepositAll() {
+  const tokens = ghostState.walletTokens.filter(tok => tok.balance > 0 && !isProtocolMint(tok.mint));
+  if (tokens.length === 0) { showNotif('No assets with balance in wallet', 'error'); return; }
+  const feeTokens = tokens.filter(t => t._feeBps && t._feeBps > 0);
+  const feeWarning = feeTokens.length > 0
+    ? '\n\n⚠️ ' + feeTokens.map(t => t.symbol + ' (' + formatFeePct(t._feeBps) + ' transfer fee)').join(', ') + ' — vault will receive less than deposited amount.'
+    : '';
+  const msg = '🔐 Deposit All Assets\n\n'
+    + 'This will deposit ' + tokens.length + ' asset(s) from your wallet into the GHOST vault:\n'
+    + tokens.map(t => '  • ' + t.symbol + ': ' + t.balance.toLocaleString(undefined,{maximumFractionDigits:6})).join('\n')
+    + feeWarning
+    + '\n\n⚠️ Make sure you trust ALL tokens in your wallet. Malicious tokens with hidden extensions could pose risks.'
+    + '\n\nProceed?';
+  if (!confirm(msg)) return;
+  dbDepositAll();
+}
+
 async function dbDepositAll() {
 const tokens = ghostState.walletTokens.filter(tok => tok.balance > 0 && !isProtocolMint(tok.mint));
 if (tokens.length === 0) { showNotif('No assets with balance in wallet', 'error'); return; }
@@ -9095,13 +9146,14 @@ let rawMintOwner = TOKEN_PROGRAM_STR;
 try { const ma = await connection.getAccountInfo(withdrawMintPk); rawMintOwner = ma?.owner?.toBase58() || TOKEN_PROGRAM_STR; } catch(e) {}
 const normalizedTokenProg = normalizeTokenProg(rawMintOwner);
 const rawTokenProgPk = new PublicKey(rawMintOwner || TOKEN_PROGRAM_STR);
+const feeBps = rawMintOwner !== TOKEN_PROGRAM_STR ? await getTransferFeeBps(withdrawMintPk) : 0;
 let vaultAta;
 try { const va = await connection.getTokenAccountsByOwner(vaultPda, { mint: withdrawMintPk }); if (va.value.length > 0) vaultAta = va.value[0].pubkey; } catch(e) {}
 if (!vaultAta) vaultAta = await findATAWithProg(vaultPda, withdrawMintPk, new PublicKey(normalizedTokenProg));
 let ownerAta;
 { const ex = await connection.getTokenAccountsByOwner(walletPk, { mint: withdrawMintPk }).catch(()=>({value:[]})); ownerAta = ex.value[0]?.pubkey || await findATA(walletPk, withdrawMintPk); }
 const ownerAtaInfo = await connection.getAccountInfo(ownerAta);
-return { vt, withdrawMintPk, rawTokenProgPk, vaultAta, ownerAta, ownerAtaMissing: !ownerAtaInfo };
+return { vt, withdrawMintPk, rawTokenProgPk, vaultAta, ownerAta, ownerAtaMissing: !ownerAtaInfo, feeBps };
 }));
 const BATCH_SIZE = 3;
 for (let i = 0; i < splMeta.length; i += BATCH_SIZE) {
@@ -9109,8 +9161,9 @@ const batch = splMeta.slice(i, i + BATCH_SIZE);
 try {
 const { blockhash } = await connection.getLatestBlockhash();
 const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
-for (const { vt, withdrawMintPk, rawTokenProgPk, vaultAta, ownerAta, ownerAtaMissing } of batch) {
-const amountRaw = BigInt(Math.round(vt.balance * Math.pow(10, vt.decimals)));
+for (const { vt, withdrawMintPk, rawTokenProgPk, vaultAta, ownerAta, ownerAtaMissing, feeBps } of batch) {
+let amountRaw = BigInt(Math.round(vt.balance * Math.pow(10, vt.decimals)));
+if (feeBps > 0) amountRaw = adjustForTransferFee(amountRaw, feeBps);
 const buf = new ArrayBuffer(8); new DataView(buf).setBigUint64(0, amountRaw, true);
 const data = new Uint8Array(16); data.set(disc, 0); data.set(new Uint8Array(buf), 8);
 if (ownerAtaMissing) tx.add(createATAInstruction(walletPk, ownerAta, walletPk, withdrawMintPk, rawTokenProgPk));
@@ -9261,13 +9314,14 @@ const splMeta2 = await Promise.all(splTokens.map(async vt => {
   let rawMintOwner = TOKEN_PROGRAM_STR;
   try { const ma = await connection.getAccountInfo(mintPk); rawMintOwner = ma?.owner?.toBase58() || TOKEN_PROGRAM_STR; } catch(e) {}
   const rawTokenProgPk = new PublicKey(rawMintOwner);
+  const feeBps = rawMintOwner !== TOKEN_PROGRAM_STR ? await getTransferFeeBps(mintPk) : 0;
   let vaultAta;
   try { const va = await connection.getTokenAccountsByOwner(vaultPda, { mint: mintPk }); if (va.value.length > 0) vaultAta = va.value[0].pubkey; } catch(e) {}
   if (!vaultAta) vaultAta = await findATAWithProg(vaultPda, mintPk, rawTokenProgPk);
   let ownerAta;
   { const ex = await connection.getTokenAccountsByOwner(walletPk, { mint: mintPk }).catch(()=>({value:[]})); ownerAta = ex.value[0]?.pubkey || await findATA(walletPk, mintPk); }
   const ownerAtaInfo = await connection.getAccountInfo(ownerAta);
-  return { vt, mintPk, rawTokenProgPk, vaultAta, ownerAta, ownerAtaMissing: !ownerAtaInfo };
+  return { vt, mintPk, rawTokenProgPk, vaultAta, ownerAta, ownerAtaMissing: !ownerAtaInfo, feeBps };
 }));
 
 // Group by token program
@@ -9286,8 +9340,9 @@ for (const [, groupItems] of Object.entries(splGroups)) {
     try {
       const { blockhash } = await connection.getLatestBlockhash();
       const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
-      for (const { vt, mintPk, rawTokenProgPk, vaultAta, ownerAta, ownerAtaMissing } of batch) {
-        const amountRaw = BigInt(Math.round(vt.balance * Math.pow(10, vt.decimals)));
+      for (const { vt, mintPk, rawTokenProgPk, vaultAta, ownerAta, ownerAtaMissing, feeBps } of batch) {
+        let amountRaw = BigInt(Math.round(vt.balance * Math.pow(10, vt.decimals)));
+        if (feeBps > 0) amountRaw = adjustForTransferFee(amountRaw, feeBps);
         const buf = new ArrayBuffer(8); new DataView(buf).setBigUint64(0, amountRaw, true);
         const data = new Uint8Array(16); data.set(disc, 0); data.set(new Uint8Array(buf), 8);
         if (ownerAtaMissing) tx.add(createATAInstruction(walletPk, ownerAta, walletPk, mintPk, rawTokenProgPk));
@@ -9450,6 +9505,45 @@ const ASSOC_TOKEN_PROG_STR = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1bso';
 function effectiveMint(mint) {
   return (mint === 'native' || mint === 'sol') ? WSOL_MINT_PK_STR : mint;
 }
+
+// ── Token-2022 Transfer Fee Helpers ─────────────────────────────────────────
+// Cache fee lookups per mint — avoids redundant RPC calls within a session
+const _transferFeeCache = {}; // { mintAddr: feeBps }
+
+// Fetch transferFeeBasisPoints from a Token-2022 mint's extensions.
+// Returns 0 for classic SPL or Token-2022 without the extension.
+async function getTransferFeeBps(mintPkOrStr) {
+  try {
+    const mintAddr = typeof mintPkOrStr === 'string' ? mintPkOrStr : mintPkOrStr.toBase58();
+    if (_transferFeeCache[mintAddr] !== undefined) return _transferFeeCache[mintAddr];
+    const res = await fetch(RPC_URL, { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({jsonrpc:'2.0',id:'tfee',method:'getAccountInfo',
+        params:[mintAddr, {encoding:'jsonParsed'}]}) });
+    const data = await res.json();
+    const extensions = data.result?.value?.data?.parsed?.info?.extensions;
+    if (!extensions || !Array.isArray(extensions)) { _transferFeeCache[mintAddr] = 0; return 0; }
+    const feeExt = extensions.find(e => e.extension === 'transferFeeConfig');
+    if (!feeExt) { _transferFeeCache[mintAddr] = 0; return 0; }
+    const bps = feeExt.state?.newerTransferFee?.transferFeeBasisPoints || 0;
+    _transferFeeCache[mintAddr] = bps;
+    if (bps > 0) console.log('[Ghost] Transfer fee for', mintAddr.slice(0,8), ':', bps, 'bps (' + (bps/100) + '%)');
+    return bps;
+  } catch(e) {
+    console.warn('[Ghost] Could not fetch transfer fee:', e);
+    return 0;
+  }
+}
+
+// Adjust raw amount for Token-2022 transfer fee (fee is ON TOP of transfer).
+// Max sendable from balance B = floor(B * 10000 / (10000 + feeBps))
+function adjustForTransferFee(rawAmount, feeBps) {
+  if (!feeBps || feeBps <= 0) return rawAmount;
+  const adjusted = rawAmount * 10000n / (10000n + BigInt(feeBps));
+  return adjusted;
+}
+
+// Format fee for display: "4%" or "0.5%"
+function formatFeePct(bps) { return (bps / 100) + '%'; }
 
 // Derive ATA — synchronous using pre-fetched PDA
 async function findATAWithProg(owner, mint, tokenProg) {
@@ -9976,7 +10070,12 @@ async function dbWithdrawAsset(mintKey) {
 
     // withdraw_from_vault discriminator
     const disc = [180, 34, 37, 46, 156, 0, 211, 238];
-    const amountRaw = BigInt(Math.round(amount * Math.pow(10, vt.decimals)));
+    let amountRaw = BigInt(Math.round(amount * Math.pow(10, vt.decimals)));
+    // Token-2022 transfer fee adjustment
+    if (!isSOL && rawMintOwner !== TOKEN_PROGRAM_STR) {
+      const feeBps = await getTransferFeeBps(withdrawMintPk);
+      if (feeBps > 0) amountRaw = adjustForTransferFee(amountRaw, feeBps);
+    }
     const buf = new ArrayBuffer(8); new DataView(buf).setBigUint64(0, amountRaw, true);
     const data = new Uint8Array(16); data.set(disc, 0); data.set(new Uint8Array(buf), 8);
 
