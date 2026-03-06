@@ -8737,7 +8737,7 @@ const splMeta = await Promise.all(splTokens.map(async t => {
   let onChainRaw = null; // raw lamport string — avoids float→int rounding
   let ownerAtaFromChain = null;
   try {
-    const ownerAccts = await connection.getTokenAccountsByOwner(walletPk, { mint: mintPk });
+    const ownerAccts = await connection.getTokenAccountsByOwner(walletPk, { mint: mintPk }, { encoding: 'jsonParsed' });
     if (ownerAccts.value.length > 0) {
       // Use the SAME account for both balance and pubkey — avoids mismatches from separate RPC calls
       const acct = ownerAccts.value[0];
@@ -8760,7 +8760,7 @@ const splMeta = await Promise.all(splTokens.map(async t => {
   // try again with the detected token program
   if (!ownerAtaFromChain && rawMintOwner !== TOKEN_PROGRAM_STR) {
     try {
-      const ownerAccts2 = await connection.getTokenAccountsByOwner(walletPk, { mint: mintPk, programId: rawTokenProgPk });
+      const ownerAccts2 = await connection.getTokenAccountsByOwner(walletPk, { mint: mintPk, programId: rawTokenProgPk }, { encoding: 'jsonParsed' });
       if (ownerAccts2.value.length > 0) {
         const acct = ownerAccts2.value[0];
         ownerAtaFromChain = acct.pubkey;
@@ -8846,14 +8846,14 @@ for (const [progStr, items] of Object.entries(splGroups)) {
         // RPC state to update, and the balance captured in Phase 1 may be stale
         let finalRaw = onChainRaw;
         try {
-          const freshAcct = await connection.getAccountInfo(ownerAta, { encoding: 'jsonParsed' });
-          const freshParsed = freshAcct?.data?.parsed?.info?.tokenAmount;
+          const freshAcct = await connection.getParsedAccountInfo(ownerAta);
+          const freshParsed = freshAcct?.value?.data?.parsed?.info?.tokenAmount;
           if (freshParsed?.amount) {
             finalRaw = freshParsed.amount;
             console.log('[Ghost] DepositAll Phase3 re-fetch:', t.symbol, '| ownerAta:', ownerAta.toBase58(), '| freshRaw:', finalRaw, '| oldRaw:', onChainRaw);
           } else {
-            // If jsonParsed failed, try getTokenAccountsByOwner as fallback
-            const freshAccts = await connection.getTokenAccountsByOwner(walletPk, { mint: mintPk });
+            // If getParsedAccountInfo failed, try getTokenAccountsByOwner as fallback
+            const freshAccts = await connection.getTokenAccountsByOwner(walletPk, { mint: mintPk }, { encoding: 'jsonParsed' });
             for (const fa of freshAccts.value) {
               const fp = fa.account?.data?.parsed?.info?.tokenAmount;
               if (fp?.amount && BigInt(fp.amount) > 0n) {
@@ -8873,7 +8873,7 @@ for (const [progStr, items] of Object.entries(splGroups)) {
         }
         const amountRaw = finalRaw ? BigInt(finalRaw) : BigInt(Math.round(onChainBalance * Math.pow(10, t.decimals)));
         if (amountRaw <= 0n) { console.warn('[Ghost] DepositAll Phase3: skipping', t.symbol, '— zero balance'); continue; }
-        console.log('[Ghost] DepositAll Phase3:', t.symbol, '| amountRaw:', amountRaw.toString(), '| finalRaw:', finalRaw, '| ownerAta:', (item.ownerAta || ownerAta).toBase58(), '| vaultAta:', vaultAta.toBase58(), '| tokenProg:', rawTokenProgPk.toBase58());
+        console.log('[Ghost] DepositAll Phase3:', t.symbol, '| amountRaw:', amountRaw.toString(), '| finalRaw:', finalRaw, '| decimals:', t.decimals, '| ownerAta:', (item.ownerAta || ownerAta).toBase58(), '| vaultAta:', vaultAta.toBase58(), '| tokenProg:', rawTokenProgPk.toBase58());
         const buf = new ArrayBuffer(8); new DataView(buf).setBigUint64(0, amountRaw, true);
         const data = new Uint8Array(16); data.set(depositDisc, 0); data.set(new Uint8Array(buf), 8);
         tx.add(new TransactionInstruction({ programId, keys: [
