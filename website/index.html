@@ -3845,7 +3845,17 @@ function parseGhostAccount(bytes) {
 
     if (executed) ghostState.ghost.status = 'executed';
     else if (awakened) ghostState.ghost.status = 'awakened';
-    else ghostState.ghost.status = 'alive';
+    else {
+      // Check if heartbeat has expired locally — on-chain awakened flag may not be set yet
+      // (requires someone to call the awaken instruction)
+      const _hbDeadline = ghostState.ghost.lastHeartbeat + ghostState.ghost.intervalSeconds * 1000;
+      if (ghostState.ghost.intervalSeconds > 0 && Date.now() > _hbDeadline) {
+        ghostState.ghost.status = 'awakened';
+        ghostState.ghost.awakened = true;
+      } else {
+        ghostState.ghost.status = 'alive';
+      }
+    }
 
 
     // Show migration card if account is v1.7 (exactly 1220 bytes, not yet migrated to v1.8)
@@ -5248,6 +5258,13 @@ function updateCountdown() {
     if (pvEl) pvEl.textContent = '100% — EXPIRED';
     if (fill) { fill.style.width = '100%'; fill.style.background = '#555'; fill.className = 'db-progress-fill'; }
 
+    // Auto-detect awakening: heartbeat expired = ghost is awakened regardless of on-chain flag
+    if (ghostState.ghost.status === 'alive') {
+      ghostState.ghost.status = 'awakened';
+      ghostState.ghost.awakened = true;
+      renderDashboard();
+    }
+
     // Show grace period bar
     const graceWrap = document.getElementById('dbGraceBarWrap');
     const graceSeconds = ghostState.ghost.gracePeriodSeconds || ghostState.ghost.graceSeconds || 0;
@@ -5260,13 +5277,6 @@ function updateCountdown() {
       const gfEl = document.getElementById('dbGraceFill');
       if (gvEl) gvEl.textContent = gracePct + '% — ' + formatDuration(graceRemaining) + ' left';
       if (gfEl) { gfEl.style.width = gracePct + '%'; }
-
-      // Auto-detect awakening transition
-      if (parseFloat(gracePct) >= 100 && ghostState.ghost.status !== 'executed' && ghostState.ghost.status !== 'awakened') {
-        ghostState.ghost.status = 'awakened';
-        ghostState.ghost.awakened = true;
-        renderDashboard();
-      }
     }
   } else {
     if (pvEl) pvEl.textContent = pct + '% elapsed';
