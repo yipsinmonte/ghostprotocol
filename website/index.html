@@ -8732,17 +8732,29 @@ if (!vaultPdaInfo || vaultPdaInfo.lamports === 0) {
 const splMeta = await Promise.all(splTokens.map(async t => {
   const mintPk = new PublicKey(effectiveMint(t.mint));
 
-  // Re-fetch on-chain balance so we never send more than available
+  // Re-fetch on-chain balance AND account pubkey using raw RPC with jsonParsed encoding
+  // web3.js getTokenAccountsByOwner doesn't reliably support { encoding: 'jsonParsed' }
+  // so we use raw fetch (same pattern as loadWalletTokens)
   let onChainBalance = t.balance;
-  let onChainRaw = null; // raw lamport string — avoids float→int rounding
+  let onChainRaw = null;
   let ownerAtaFromChain = null;
   try {
-    const ownerAccts = await connection.getTokenAccountsByOwner(walletPk, { mint: mintPk }, { encoding: 'jsonParsed' });
-    if (ownerAccts.value.length > 0) {
-      // Use the SAME account for both balance and pubkey — avoids mismatches from separate RPC calls
-      const acct = ownerAccts.value[0];
-      ownerAtaFromChain = acct.pubkey;
-      const parsed = acct.account?.data?.parsed?.info?.tokenAmount;
+    // Try classic SPL first, then Token-2022 if needed
+    const rpcRes = await fetch(RPC_URL, { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({jsonrpc:'2.0',id:'da_p1',method:'getTokenAccountsByOwner',
+        params:[ghostState.publicKey, {mint: effectiveMint(t.mint)}, {encoding:'jsonParsed'}]}) });
+    const rpcData = await rpcRes.json();
+    const accts = rpcData.result?.value || [];
+    if (accts.length > 0) {
+      // Find the account with the highest balance (in case of multiple)
+      let bestAcct = accts[0];
+      let bestRaw = BigInt(bestAcct.account?.data?.parsed?.info?.tokenAmount?.amount || '0');
+      for (let ai = 1; ai < accts.length; ai++) {
+        const raw = BigInt(accts[ai].account?.data?.parsed?.info?.tokenAmount?.amount || '0');
+        if (raw > bestRaw) { bestAcct = accts[ai]; bestRaw = raw; }
+      }
+      ownerAtaFromChain = new PublicKey(bestAcct.pubkey);
+      const parsed = bestAcct.account?.data?.parsed?.info?.tokenAmount;
       if (parsed) {
         onChainBalance = Number(parsed.uiAmount || 0);
         onChainRaw = parsed.amount || null;
@@ -8755,24 +8767,6 @@ const splMeta = await Promise.all(splTokens.map(async t => {
   let rawMintOwner = TOKEN_PROGRAM_STR;
   try { const ma = await connection.getAccountInfo(mintPk); rawMintOwner = ma?.owner?.toBase58() || TOKEN_PROGRAM_STR; } catch(e) {}
   const rawTokenProgPk = new PublicKey(rawMintOwner || TOKEN_PROGRAM_STR);
-
-  // If getTokenAccountsByOwner returned nothing (possible if token is Token-2022 but we queried classic),
-  // try again with the detected token program
-  if (!ownerAtaFromChain && rawMintOwner !== TOKEN_PROGRAM_STR) {
-    try {
-      const ownerAccts2 = await connection.getTokenAccountsByOwner(walletPk, { mint: mintPk, programId: rawTokenProgPk }, { encoding: 'jsonParsed' });
-      if (ownerAccts2.value.length > 0) {
-        const acct = ownerAccts2.value[0];
-        ownerAtaFromChain = acct.pubkey;
-        const parsed = acct.account?.data?.parsed?.info?.tokenAmount;
-        if (parsed) {
-          onChainBalance = Number(parsed.uiAmount || 0);
-          onChainRaw = parsed.amount || null;
-        }
-        console.log('[Ghost] DepositAll Phase1 retry with', rawMintOwner.slice(0,8), ':', t.symbol, '| balance:', onChainBalance, '| raw:', onChainRaw);
-      }
-    } catch(_) {}
-  }
 
   const ownerAta = ownerAtaFromChain || await findATAWithProg(walletPk, mintPk, rawTokenProgPk);
 
@@ -8840,47 +8834,28 @@ for (const [progStr, items] of Object.entries(splGroups)) {
       const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
 
       for (const item of batch) {
-        const { t, mintPk, rawTokenProgPk, ownerAta, vaultAta, onChainBalance, onChainRaw } = item;
-        // DEFENSIVE: Re-fetch the actual raw balance from the ownerAta account RIGHT NOW
-        // because Phase 2 vault account creation (and earlier batch txs) may have caused
-        // RPC state to update, and the balance captured in Phase 1 may be stale
-        let finalRaw = onChainRaw;
+        let { t, mintPk, rawTokenProgPk, ownerAta, vaultAta, onChainBalance, onChainRaw } = item;
+        // Defensive re-fetch: get actual raw balance via getParsedAccountInfo right before building tx
         try {
           const freshAcct = await connection.getParsedAccountInfo(ownerAta);
           const freshParsed = freshAcct?.value?.data?.parsed?.info?.tokenAmount;
           if (freshParsed?.amount) {
-            finalRaw = freshParsed.amount;
-            console.log('[Ghost] DepositAll Phase3 re-fetch:', t.symbol, '| ownerAta:', ownerAta.toBase58(), '| freshRaw:', finalRaw, '| oldRaw:', onChainRaw);
-          } else {
-            // If getParsedAccountInfo failed, try getTokenAccountsByOwner as fallback
-            const freshAccts = await connection.getTokenAccountsByOwner(walletPk, { mint: mintPk }, { encoding: 'jsonParsed' });
-            for (const fa of freshAccts.value) {
-              const fp = fa.account?.data?.parsed?.info?.tokenAmount;
-              if (fp?.amount && BigInt(fp.amount) > 0n) {
-                finalRaw = fp.amount;
-                // Also fix ownerAta if it was pointing to wrong account
-                if (fa.pubkey.toBase58() !== ownerAta.toBase58()) {
-                  console.warn('[Ghost] DepositAll Phase3: ownerAta MISMATCH! Stored:', ownerAta.toBase58(), 'Actual:', fa.pubkey.toBase58());
-                  item.ownerAta = fa.pubkey; // fix it
-                }
-                break;
-              }
-            }
-            console.log('[Ghost] DepositAll Phase3 fallback re-fetch:', t.symbol, '| finalRaw:', finalRaw);
+            onChainRaw = freshParsed.amount;
+            console.log('[Ghost] DepositAll Phase3 re-fetch OK:', t.symbol, '| raw:', onChainRaw);
           }
-        } catch(refetchErr) {
-          console.warn('[Ghost] DepositAll Phase3 re-fetch failed for', t.symbol, refetchErr);
+        } catch(_re) {
+          console.warn('[Ghost] DepositAll Phase3 re-fetch failed:', t.symbol, _re.message);
         }
-        const amountRaw = finalRaw ? BigInt(finalRaw) : BigInt(Math.round(onChainBalance * Math.pow(10, t.decimals)));
-        if (amountRaw <= 0n) { console.warn('[Ghost] DepositAll Phase3: skipping', t.symbol, '— zero balance'); continue; }
-        console.log('[Ghost] DepositAll Phase3:', t.symbol, '| amountRaw:', amountRaw.toString(), '| finalRaw:', finalRaw, '| decimals:', t.decimals, '| ownerAta:', (item.ownerAta || ownerAta).toBase58(), '| vaultAta:', vaultAta.toBase58(), '| tokenProg:', rawTokenProgPk.toBase58());
+        const amountRaw = onChainRaw ? BigInt(onChainRaw) : BigInt(Math.round(onChainBalance * Math.pow(10, t.decimals)));
+        if (amountRaw <= 0n) { console.warn('[Ghost] Skipping', t.symbol, '— zero balance'); continue; }
+        console.log('[Ghost] DepositAll Phase3:', t.symbol, '| amountRaw:', amountRaw.toString(), '| onChainRaw:', onChainRaw, '| decimals:', t.decimals, '| ownerAta:', ownerAta.toBase58(), '| vaultAta:', vaultAta.toBase58());
         const buf = new ArrayBuffer(8); new DataView(buf).setBigUint64(0, amountRaw, true);
         const data = new Uint8Array(16); data.set(depositDisc, 0); data.set(new Uint8Array(buf), 8);
         tx.add(new TransactionInstruction({ programId, keys: [
           { pubkey: ghostPda,       isSigner: false, isWritable: false },
           { pubkey: walletPk,       isSigner: true,  isWritable: true  },
           { pubkey: mintPk,         isSigner: false, isWritable: false },
-          { pubkey: item.ownerAta || ownerAta, isSigner: false, isWritable: true  },
+          { pubkey: ownerAta,       isSigner: false, isWritable: true  },
           { pubkey: vaultAta,       isSigner: false, isWritable: true  },
           { pubkey: rawTokenProgPk, isSigner: false, isWritable: false },
         ], data }));
@@ -8902,8 +8877,6 @@ for (const [progStr, items] of Object.entries(splGroups)) {
       for (const { t, vaultAta: va, onChainBalance } of batch) {
         const amount = onChainBalance;
         const vaultMint = t.mint;
-        // Clear withdrawn-mint suppression — we just deposited this token, vault scanner
-        // should show it immediately instead of suppressing it from a previous withdrawal
         ghostState._withdrawnMints.delete(vaultMint);
         ghostState._withdrawnMints.delete(t.mint);
         _saveWithdrawnMints();
@@ -8943,13 +8916,13 @@ for (const t of solTokens) {
     const wsolRent = await connection.getMinimumBalanceForRentExemption(165);
     const rentReserve = existingWsol ? 0 : wsolRent / 1e9;
 
-    // Check if vault wSOL token account exists — if not, we need rent for that too
+    // Check if vault wSOL account exists — if not, reserve rent for that too
     let vaultWsolRentReserve = 0;
     try {
-      const ex = await connection.getTokenAccountsByOwner(vaultPda, { mint: WSOL_MINT_PK });
-      if (!ex.value.length) {
-        const _vwCheck = await findATAWithProg(vaultPda, WSOL_MINT_PK, TOKEN_PROG_PK);
-        if (!(await connection.getAccountInfo(_vwCheck).catch(()=>null))) vaultWsolRentReserve = wsolRent / 1e9;
+      const vwCheck = await connection.getTokenAccountsByOwner(vaultPda, { mint: WSOL_MINT_PK });
+      if (!vwCheck.value.length) {
+        const vwAta = await findATAWithProg(vaultPda, WSOL_MINT_PK, TOKEN_PROG_PK);
+        if (!(await connection.getAccountInfo(vwAta).catch(()=>null))) vaultWsolRentReserve = wsolRent / 1e9;
       }
     } catch(_) { vaultWsolRentReserve = wsolRent / 1e9; }
 
@@ -9634,10 +9607,7 @@ async function dbDeposit() {
   // Helper: update UI state after successful deposit
   const _applyDeposit = () => {
     t.balance = Math.max(0, t.balance - amount);
-    // For SOL: store as 'native' in vaultTokens so it merges correctly with chain-fetched SOL entry
-    // On-chain the vault holds a wSOL ATA but we always display/track as 'native' internally
     const vaultMint = isSOL ? 'native' : mintStr;
-    // Clear withdrawn-mint suppression — we just deposited this token
     ghostState._withdrawnMints.delete(vaultMint);
     if (isSOL) ghostState._withdrawnMints.delete('So11111111111111111111111111111111111111112');
     _saveWithdrawnMints();
@@ -9813,7 +9783,7 @@ async function dbDeposit() {
     // Phase 2: For SOL — wrap native SOL to wSOL in separate tx
     let effectiveOwnerAta = ownerAta;
     if (isSOL) {
-      // Re-fetch live SOL balance — Phase 1 vault account creation may have consumed rent + fees
+      // Re-fetch live SOL balance — Phase 1 vault account creation may have consumed rent
       let _liveBalSingle = t.balance;
       try {
         const _balResp = await fetch(RPC_URL, { method:'POST', headers:{'Content-Type':'application/json'},
