@@ -127,7 +127,7 @@
     10%  { opacity: 0.5; }
     100% { width: 1100px; height: 1100px; opacity: 0; transform: translate(-50%,-50%) scale(1); }
   }
-  .hero-logo { width: 120px; height: 120px; margin-bottom: 20px; animation: fade-up 1s ease both; filter: drop-shadow(0 0 30px rgba(102,51,255,0.5)); border-radius: 50%; -webkit-backface-visibility: hidden; }
+  .hero-logo { width: 120px; height: 120px; margin-bottom: 20px; animation: fade-up 1s ease both; }
   .hero-eyebrow { font-family: 'Share Tech Mono', monospace; font-size: 13px; letter-spacing: 0.4em; color: var(--muted); text-transform: uppercase; margin-bottom: 16px; animation: fade-up 1s ease 0.1s both; }
   .hero-eyebrow::before { content: '◈ '; }
   .hero-eyebrow::after { content: ' ◈'; }
@@ -1937,7 +1937,11 @@
   <div class="hero-bg"></div>
   <div class="hero-grid"></div>
   <svg class="hero-logo" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
-    <defs><radialGradient id="coinGrad" cx="40%" cy="35%" r="60%"><stop offset="0%" stop-color="#9966ff"/><stop offset="50%" stop-color="#6633ff"/><stop offset="100%" stop-color="#2200aa"/></radialGradient></defs>
+    <defs>
+      <radialGradient id="coinGrad" cx="40%" cy="35%" r="60%"><stop offset="0%" stop-color="#9966ff"/><stop offset="50%" stop-color="#6633ff"/><stop offset="100%" stop-color="#2200aa"/></radialGradient>
+      <filter id="coinGlow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur in="SourceGraphic" stdDeviation="15" result="blur"/><feColorMatrix in="blur" type="matrix" values="0.4 0 0 0 0.2  0 0.2 0 0 0  0 0 1 0 0.5  0 0 0 0.6 0" result="glow"/><feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    </defs>
+    <g filter="url(#coinGlow)">
     <circle cx="200" cy="200" r="180" fill="rgba(102,51,255,0.08)"/>
     <circle cx="200" cy="200" r="155" fill="none" stroke="#6633ff" stroke-width="1" opacity="0.3"/>
     <circle cx="200" cy="200" r="140" fill="url(#coinGrad)"/>
@@ -1950,6 +1954,7 @@
     <circle cx="178" cy="172" r="3" fill="#ffffff" opacity="0.9"/>
     <circle cx="216" cy="172" r="3" fill="#ffffff" opacity="0.9"/>
     <polyline points="138,205 155,205 163,205 167,188 172,222 176,196 180,214 184,205 216,205 220,205 224,190 228,220 232,197 236,210 240,205 262,205" fill="none" stroke="#ff3366" stroke-width="2" opacity="0.85" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
   </svg>
   <p class="hero-eyebrow">Trustless · Solana · Digital Legacy Protocol</p>
   <h1 class="hero-title" data-text="GHOST">GHOST</h1>
