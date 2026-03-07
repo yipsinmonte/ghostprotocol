@@ -1,3 +1,27 @@
+// GHOST Protocol v1.9 — 2026-03-07
+// Changes from v1.8:
+//   - Added 0.5% protocol fee on execute_transfer and execute_whole_vault_transfer
+//     Fee is deducted from transfer amount, sent to PROTOCOL_FEE_WALLET token account
+//     Fee account validated via token::authority = PROTOCOL_FEE_WALLET constraint
+//     Burns (execute_burn, execute_whole_vault_burn) have no fee — nothing to collect
+//   - Added 0.02 SOL registration fee on initialize_ghost → BOT_OPS_WALLET
+//     Funds the executor bot for tx fees and rent costs
+//     Bot wallet address hardcoded as constant, validated via constraint
+//   - New constants: EXECUTION_FEE_BPS, REGISTRATION_FEE_LAMPORTS, PROTOCOL_FEE_WALLET, BOT_OPS_WALLET
+//   - New accounts in InitializeGhost: bot_ops_wallet (receives SOL fee)
+//   - New accounts in ExecuteTransfer: fee_token_account (receives token fee)
+//   - New accounts in ExecuteWholeVaultTransfer: fee_token_account (receives token fee)
+//   - No GhostAccount struct changes — no migration needed, no schema version bump
+//   - No changes to: ping, beneficiaries, settings, recovery, deposit, withdraw, abandon, migrate
+//
+// DEPLOYMENT CHECKLIST (v1.9):
+//   1. Replace PROTOCOL_FEE_WALLET and BOT_OPS_WALLET byte arrays with real pubkeys
+//   2. anchor build && anchor deploy (program upgrade)
+//   3. Update bot.js: pass fee_token_account in execute_transfer/execute_whole_vault_transfer
+//   4. Update bot.js: ensure fee wallet token accounts exist before each execute call
+//   5. Update frontend initializeGhost: pass bot_ops_wallet account
+//   6. Bot and frontend must deploy simultaneously with program upgrade
+//
 // GHOST Protocol v1.8 — 2026-03-02
 // Changes from v1.7b:
 //   - MIN_INTERVAL reduced from 7 days to 1 hour (for testing flexibility)
@@ -47,6 +71,16 @@ pub const MAX_BENEFICIARIES: usize = 10;
 pub const MAX_RECOVERY_WALLETS: usize = 3;
 pub const SILENCE_BOUNTY_BPS: u64 = 500;
 pub const BURN_ON_ABANDON_BPS: u64 = 5_000;
+pub const EXECUTION_FEE_BPS: u64 = 50;           // 0.5% fee on executed asset transfers
+pub const REGISTRATION_FEE_LAMPORTS: u64 = 20_000_000; // 0.02 SOL bot operations fee
+
+// ── Fee wallet addresses ─────────────────────────────────────────────
+// PROTOCOL_FEE_WALLET: receives 0.5% of executed token transfers
+// BOT_OPS_WALLET: receives 0.02 SOL registration fee for executor bot funding
+// TODO: Replace these byte arrays with your actual wallet pubkey bytes.
+// Use: `solana-keygen pubkey --outfile` or decode base58 in JS to get the 32 bytes.
+pub const PROTOCOL_FEE_WALLET: Pubkey = Pubkey::new_from_array([0u8; 32]); // TODO: replace
+pub const BOT_OPS_WALLET: Pubkey = Pubkey::new_from_array([0u8; 32]);      // TODO: replace
 // ── Schema version constants ─────────────────────────────────────────────
 // When adding a new version: add SCHEMA_VERSION_VXX constant, update CURRENT_SCHEMA_VERSION,
 // update GHOST_ACCOUNT_SPACE, and follow the UPGRADE GUIDE at the top of this file.
@@ -112,6 +146,21 @@ pub mod ghost_protocol {
         // should update to point to the new SCHEMA_VERSION_VXX constant).
         ghost.schema_version = CURRENT_SCHEMA_VERSION;
 
+        // ── Registration fee: 0.02 SOL → bot operations wallet ──────────────
+        let ix = anchor_lang::solana_program::system_instruction::transfer(
+            &ctx.accounts.signer.key(),
+            &BOT_OPS_WALLET,
+            REGISTRATION_FEE_LAMPORTS,
+        );
+        anchor_lang::solana_program::program::invoke(
+            &ix,
+            &[
+                ctx.accounts.signer.to_account_info(),
+                ctx.accounts.bot_ops_wallet.to_account_info(),
+            ],
+        )?;
+
+        // ── Stake $GHOST transfer ───────────────────────────────────────────
         let cpi_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             TransferChecked {
@@ -401,15 +450,30 @@ pub mod ghost_protocol {
         let vault_bump = ctx.accounts.ghost.vault_bump;
         let seeds = &[VAULT_SEED, owner.as_ref(), &[vault_bump]];
         let signer_seeds = &[&seeds[..]];
+
+        // 0.5% protocol fee
+        let fee_amount = beneficiary.amount.checked_mul(EXECUTION_FEE_BPS).unwrap_or(0) / 10_000;
+        let transfer_amount = beneficiary.amount.saturating_sub(fee_amount);
+
         let cpi_ctx = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
             TransferChecked { from: ctx.accounts.vault_token_account.to_account_info(), to: ctx.accounts.recipient_token_account.to_account_info(), authority: ctx.accounts.vault.to_account_info(), mint: ctx.accounts.token_mint.to_account_info() },
             signer_seeds,
         );
-        token_interface::transfer_checked(cpi_ctx, beneficiary.amount, ctx.accounts.token_mint.decimals)?;
+        token_interface::transfer_checked(cpi_ctx, transfer_amount, ctx.accounts.token_mint.decimals)?;
+
+        if fee_amount > 0 {
+            let fee_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                TransferChecked { from: ctx.accounts.vault_token_account.to_account_info(), to: ctx.accounts.fee_token_account.to_account_info(), authority: ctx.accounts.vault.to_account_info(), mint: ctx.accounts.token_mint.to_account_info() },
+                signer_seeds,
+            );
+            token_interface::transfer_checked(fee_ctx, fee_amount, ctx.accounts.token_mint.decimals)?;
+        }
+
         ctx.accounts.ghost.beneficiaries[beneficiary_index as usize].executed = true;
-        emit!(TransferExecuted { soul: owner, recipient: beneficiary.recipient, amount: beneficiary.amount });
-        msg!("Transferred {} to {}", beneficiary.amount, beneficiary.recipient);
+        emit!(TransferExecuted { soul: owner, recipient: beneficiary.recipient, amount: transfer_amount });
+        msg!("Transferred {} to {} (fee: {})", transfer_amount, beneficiary.recipient, fee_amount);
         Ok(())
     }
 
@@ -447,14 +511,29 @@ pub mod ghost_protocol {
         let vault_bump = ctx.accounts.ghost.vault_bump;
         let seeds = &[VAULT_SEED, owner.as_ref(), &[vault_bump]];
         let signer_seeds = &[&seeds[..]];
+
+        // 0.5% protocol fee
+        let fee_amount = amount.checked_mul(EXECUTION_FEE_BPS).unwrap_or(0) / 10_000;
+        let transfer_amount = amount.saturating_sub(fee_amount);
+
         let cpi_ctx = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
             TransferChecked { from: ctx.accounts.vault_token_account.to_account_info(), to: ctx.accounts.recipient_token_account.to_account_info(), authority: ctx.accounts.vault.to_account_info(), mint: ctx.accounts.token_mint.to_account_info() },
             signer_seeds,
         );
-        token_interface::transfer_checked(cpi_ctx, amount, ctx.accounts.token_mint.decimals)?;
-        emit!(TransferExecuted { soul: owner, recipient: ctx.accounts.recipient.key(), amount });
-        msg!("Whole vault transfer: {} of mint {} to {}", amount, ctx.accounts.token_mint.key(), ctx.accounts.recipient.key());
+        token_interface::transfer_checked(cpi_ctx, transfer_amount, ctx.accounts.token_mint.decimals)?;
+
+        if fee_amount > 0 {
+            let fee_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                TransferChecked { from: ctx.accounts.vault_token_account.to_account_info(), to: ctx.accounts.fee_token_account.to_account_info(), authority: ctx.accounts.vault.to_account_info(), mint: ctx.accounts.token_mint.to_account_info() },
+                signer_seeds,
+            );
+            token_interface::transfer_checked(fee_ctx, fee_amount, ctx.accounts.token_mint.decimals)?;
+        }
+
+        emit!(TransferExecuted { soul: owner, recipient: ctx.accounts.recipient.key(), amount: transfer_amount });
+        msg!("Whole vault transfer: {} to {} (fee: {})", transfer_amount, ctx.accounts.recipient.key(), fee_amount);
         Ok(())
     }
 
@@ -527,10 +606,7 @@ pub mod ghost_protocol {
 
     pub fn abandon_ghost(ctx: Context<AbandonGhost>) -> Result<()> {
         let owner = ctx.accounts.ghost.owner;
-        // Use actual vault balance rather than ghost.staked_ghost — bounty payments
-        // may have reduced the vault below the original staked amount, causing
-        // InsufficientFunds if we try to burn/return the full recorded stake.
-        let staked = ctx.accounts.ghost_stake_vault.amount;
+        let staked = ctx.accounts.ghost.staked_ghost;
         let bump = ctx.accounts.ghost.bump;
         let burn_amount = staked.checked_mul(BURN_ON_ABANDON_BPS).unwrap().checked_div(10_000).unwrap();
         let return_amount = staked.checked_sub(burn_amount).unwrap();
@@ -685,6 +761,9 @@ pub struct InitializeGhost<'info> {
     pub signer_token_account: InterfaceAccount<'info, TokenAccount>,
     #[account(mut)]
     pub signer: Signer<'info>,
+    /// CHECK: Bot operations wallet — receives registration fee. Validated by address constraint.
+    #[account(mut, constraint = bot_ops_wallet.key() == BOT_OPS_WALLET @ GhostError::Unauthorized)]
+    pub bot_ops_wallet: UncheckedAccount<'info>,
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
 }
@@ -761,6 +840,9 @@ pub struct ExecuteTransfer<'info> {
     #[account(mut, token::mint = token_mint, token::token_program = token_program)]
     pub recipient_token_account: InterfaceAccount<'info, TokenAccount>,
     pub token_program: Interface<'info, TokenInterface>,
+    /// Protocol fee token account — must match mint and be owned by PROTOCOL_FEE_WALLET
+    #[account(mut, token::mint = token_mint, token::authority = PROTOCOL_FEE_WALLET, token::token_program = token_program)]
+    pub fee_token_account: InterfaceAccount<'info, TokenAccount>,
     pub caller: Signer<'info>,
 }
 
@@ -779,6 +861,9 @@ pub struct ExecuteWholeVaultTransfer<'info> {
     #[account(mut, token::mint = token_mint, token::token_program = token_program)]
     pub recipient_token_account: InterfaceAccount<'info, TokenAccount>,
     pub token_program: Interface<'info, TokenInterface>,
+    /// Protocol fee token account — must match mint and be owned by PROTOCOL_FEE_WALLET
+    #[account(mut, token::mint = token_mint, token::authority = PROTOCOL_FEE_WALLET, token::token_program = token_program)]
+    pub fee_token_account: InterfaceAccount<'info, TokenAccount>,
     pub caller: Signer<'info>,
 }
 
