@@ -840,7 +840,7 @@
 
   /* ── Hero section ── */
   @media (max-width: 768px) {
-    .hero { padding: 40px 20px 60px; min-height: auto; }
+    .hero { padding: 30px 20px 40px; min-height: calc(100vh - 120px); min-height: calc(100dvh - 120px); display: flex; flex-direction: column; justify-content: center; }
     .hero-logo { width: clamp(110px, 30vw, 150px); height: auto; margin-bottom: 20px !important; }
     .hero-eyebrow { font-size: 8px; letter-spacing: 0.08em; margin-bottom: 14px; }
     .hero-title { font-size: clamp(64px, 17vw, 100px) !important; margin-bottom: 32px !important; margin-top: 6px; }
@@ -1151,7 +1151,7 @@
     </div>
     <div class="wallet-option" onclick="connectWallet('Backpack')">
       <span class="w-icon">🎒</span>
-      <div><div class="w-name">Backpack</div><div class="w-desc">xNFT wallet by Coral</div></div>
+      <div><div class="w-name">Backpack</div><div class="w-desc">xNFT wallet by Coral</div><div class="w-desc w-mobile-hint" style="display:none;color:#9966ff;margin-top:4px;font-size:10px">Opens in Backpack app on mobile</div></div>
     </div>
   </div>
 </div>
@@ -2887,14 +2887,21 @@ async function connectWallet(name) {
   // Mobile deep linking — if provider not found and on mobile, open in wallet's in-app browser
   if (!provider && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
     const currentUrl = encodeURIComponent(window.location.href);
+    const ref = encodeURIComponent(window.location.origin);
     if (name === 'Phantom') {
       window.location.href = 'https://phantom.app/ul/browse/' + currentUrl;
       return;
     } else if (name === 'Solflare') {
-      window.location.href = 'https://solflare.com/ul/v1/browse/' + currentUrl;
+      window.location.href = 'https://solflare.com/ul/v1/browse/' + currentUrl + '?ref=' + ref;
       return;
     } else if (name === 'Backpack') {
-      // Backpack doesn't have a universal browse link — fall through to demo
+      // Backpack doesn't have a public browse deep link — try their app scheme
+      window.location.href = 'https://backpack.app/ul/browse/' + currentUrl;
+      // If the app isn't installed, the link will fail — fall through after a delay
+      await new Promise(r => setTimeout(r, 1500));
+      // If we're still here, app wasn't installed
+      showNotif('Backpack app not detected — install it or open this site in Backpack\'s browser', '');
+      return;
     }
   }
 
