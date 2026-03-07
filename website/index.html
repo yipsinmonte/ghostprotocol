@@ -794,8 +794,8 @@
 
   /* ── Mobile nav: hamburger menu ── */
   @media (max-width: 768px) {
-    nav { padding: 14px 16px; gap: 8px; }
-    .nav-logo { font-size: 15px; letter-spacing: 0.15em; flex-shrink: 0; }
+    nav { padding: 14px 16px; gap: 6px; }
+    .nav-logo { font-size: 15px; letter-spacing: 0.15em; flex-shrink: 0; margin-right: auto; }
     .nav-links { 
       display: none; 
       position: fixed; top: 54px; left: 0; right: 0; 
@@ -808,12 +808,17 @@
     .nav-links.mobile-open { display: flex; }
     .nav-links li { border-bottom: 1px solid rgba(255,255,255,0.03); }
     .nav-links a { display: block; padding: 14px 24px; font-size: 12px; }
-    .wallet-btn { font-size: 10px; padding: 6px 12px; }
-    #navDisconnectBtn { padding: 5px 8px !important; font-size: 10px !important; }
+    .wallet-btn { font-size: 0 !important; padding: 6px 8px !important; letter-spacing: 0 !important; border-color: var(--green) !important; order: 10; }
+    .wallet-btn::after { content: '⏻'; font-size: 14px; color: #33ff99; }
+    .wallet-btn.connected { font-size: 0 !important; display: none !important; }
+    #navDisconnectBtn { font-size: 0 !important; padding: 6px 8px !important; margin-left: 0 !important; margin-right: 0 !important; order: 10; }
+    #navDisconnectBtn::after { content: '⏻'; font-size: 14px; }
     .mobile-hamburger {
       display: flex; flex-direction: column; gap: 4px; 
       background: none; border: none; cursor: pointer; padding: 6px;
-      margin-left: auto; margin-right: 0;
+      margin-right: 0;
+      order: 11;
+    }
     }
     .mobile-hamburger span { display: block; width: 20px; height: 2px; background: #b0b0c8; border-radius: 1px; }
   }
@@ -835,19 +840,21 @@
   /* ── Hero section ── */
   @media (max-width: 768px) {
     .hero { padding: 40px 20px 60px; min-height: auto; }
-    .hero-logo { width: clamp(100px, 30vw, 160px); height: auto; }
-    .hero-eyebrow { font-size: 10px; letter-spacing: 0.12em; margin-bottom: 12px; }
-    .hero-title { font-size: clamp(48px, 14vw, 80px) !important; }
-    .hero-title::before, .hero-title::after { display: none; } /* hide glitch marks on mobile */
+    .hero-logo { width: clamp(80px, 22vw, 120px); height: auto; margin-bottom: 14px !important; }
+    .hero-eyebrow { font-size: 8px; letter-spacing: 0.08em; margin-bottom: 8px; }
+    .hero-title { font-size: clamp(56px, 16vw, 90px) !important; margin-bottom: 24px !important; }
+    .hero-title::before, .hero-title::after { display: none; }
     .hero-ticker { font-size: clamp(14px, 3vw, 18px); }
     .hero-sub { font-size: clamp(14px, 3vw, 18px); max-width: 90%; margin-bottom: 32px; }
-    .hero-actions { gap: 12px; }
-    .cta-btn { font-size: 13px; padding: 12px 24px; }
-    .btn-register { font-size: 12px; padding: 14px 32px; letter-spacing: 0.15em; gap: 10px; }
-    .hero-secondary-btns { gap: 12px; }
-    .btn-ghost-link { font-size: 11px; }
-    .heartbeat-bar { padding: 0 10px; }
-    .hb-label { font-size: 11px; }
+    .hero-actions { gap: 8px; }
+    .cta-btn { font-size: 11px; padding: 9px 18px; }
+    .btn-register { font-size: 9px; padding: 10px 20px; letter-spacing: 0.1em; gap: 7px; }
+    .btn-register-pulse { width: 5px; height: 5px; }
+    .btn-register-icon { font-size: 11px; }
+    .hero-secondary-btns { gap: 14px; }
+    .btn-ghost-link { font-size: 8px; letter-spacing: 0.12em; }
+    .heartbeat-bar { padding: 0 10px; transform: scale(0.85); transform-origin: center top; }
+    .hb-label { font-size: 9px; letter-spacing: 0.15em; }
     /* Hide cursor trail on mobile */
     .cursor-trail { display: none !important; }
     /* Hide ghost watermark on mobile */
@@ -910,9 +917,13 @@
 
   /* ── Dashboard panel — mobile ── */
   @media (max-width: 800px) {
-    .panel-topbar { padding: 0 12px; height: 50px; }
-    .panel-back { font-size: 11px; padding: 6px 10px; letter-spacing: 0.08em; white-space: nowrap; }
-    .panel-wallet { font-size: 11px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+    .panel-topbar { padding: 0 10px; height: 50px; }
+    .panel-back { font-size: 0; padding: 6px 8px; letter-spacing: 0; white-space: nowrap; }
+    .panel-back::before { content: '←'; font-size: 14px; }
+    .panel-wallet { font-size: 10px; max-width: none; overflow: visible; gap: 6px !important; margin-left: auto; }
+    .panel-wallet span[id="panelWalletAddr"] { max-width: 90px; overflow: hidden; text-overflow: ellipsis; display: inline-block; white-space: nowrap; }
+    .panel-wallet button { font-size: 0 !important; padding: 5px 8px !important; }
+    .panel-wallet button::before { content: '⏻'; font-size: 13px; color: #ff6666; }
     
     /* Sidebar becomes bottom nav — single row, 5 items */
     .panel-body { flex-direction: column; position: relative; }
@@ -932,23 +943,25 @@
     .sidebar-section-label { display: none; }
     .sidebar-footer-info { display: none; }
     /* Hide non-essential nav items on mobile */
-    .db-nav-item[onclick*="watcher"] { display: none; }
     .db-nav-item[onclick*="closeDashboard"] { display: none; }
     .db-nav-item[onclick*="disconnectWallet"] { display: none; }
     .db-nav-item[onclick*="heartbeat"] { display: none; }
     .db-nav-item { 
       flex: 1;
-      flex-direction: column; gap: 2px;
-      padding: 10px 4px; 
-      font-size: 9px; letter-spacing: 0.02em;
+      flex-direction: column; gap: 1px;
+      padding: 8px 2px; 
+      font-size: 8px; letter-spacing: 0;
       white-space: nowrap;
       border-left: none;
       text-align: center; justify-content: center;
       display: flex; align-items: center;
       border-top: 2px solid transparent;
+      min-width: 0;
     }
     .db-nav-item.active { border-left-color: transparent; border-top-color: #7744ff; background: rgba(102,51,255,0.08); }
-    .db-nav-icon { font-size: 18px; width: auto; }
+    .db-nav-icon { font-size: 16px; width: auto; }
+    /* Truncate long nav labels */
+    .db-nav-item { overflow: hidden; text-overflow: ellipsis; max-width: 16.66%; }
     
     .panel-main { 
       padding: 16px 16px 80px; /* 80px for single-row bottom nav */
@@ -1023,8 +1036,8 @@
     .unit-input-row { flex-direction: column; }
 
     /* ── Heartbeat orb ── */
-    .hb-orb-wrap { width: 100px !important; height: 100px !important; margin: 0 auto; }
-    .hb-orb-center { width: 56px !important; height: 56px !important; }
+    .hb-orb-wrap { width: 120px !important; height: 120px !important; margin: 0 auto; }
+    .hb-orb-center { width: 68px !important; height: 68px !important; }
     .hb-orb-label { text-align: center; width: 100%; }
 
     /* ── Beneficiary rows ── */
@@ -1167,7 +1180,7 @@
       <div class="db-nav-item db-nav-locked" id="nav-recovery" onclick="dbShowPage('recovery', this)"><span class="db-nav-icon">🔑</span>Recovery</div>
       <div class="db-nav-item db-nav-locked" id="nav-settings" onclick="dbShowPage('settings', this)"><span class="db-nav-icon">⚙️</span>Settings</div>
       <div class="sidebar-section-label" style="margin-top:6px">Protocol</div>
-      <div class="db-nav-item" onclick="dbShowPage('watcher', this)"><span class="db-nav-icon">💓</span>Heartbeat Checker</div>
+      <div class="db-nav-item" onclick="dbShowPage('watcher', this)"><span class="db-nav-icon">😇</span>Guardian</div>
       <div class="db-nav-item" onclick="closeDashboard()"><span class="db-nav-icon">🌐</span>Back to site</div>
       <div class="db-nav-item" onclick="disconnectWallet()" style="color:#ff6666;margin-top:2px"><span class="db-nav-icon">⏻</span>Disconnect</div>
       <div class="sidebar-footer-info">
