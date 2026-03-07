@@ -290,6 +290,8 @@
     position: fixed;
     top: 0; left: 0;
     width: 100vw; height: 100vh;
+    height: 100dvh;
+    height: -webkit-fill-available;
     z-index: 9999;
     background: #030305;
     flex-direction: column;
@@ -964,7 +966,7 @@
     .db-nav-item { overflow: hidden; text-overflow: ellipsis; max-width: 16.66%; }
     
     .panel-main { 
-      padding: 16px 16px calc(80px + env(safe-area-inset-bottom, 0px)); /* 80px nav + safe area */
+      padding: 16px 16px calc(80px + env(safe-area-inset-bottom, 0px));
       order: 1;
     }
 
@@ -5245,6 +5247,9 @@ function openDashboard() {
   saveSession();
   if (!ghostState.connected) { openModal(); return; }
   document.getElementById('dashboardPanel').classList.add('open');
+  // Re-measure viewport for iOS Safari
+  const dp = document.getElementById('dashboardPanel');
+  dp.style.height = window.innerHeight + 'px';
   document.body.style.overflow = 'hidden';
   updateDashboardUI(); // handles none vs alive routing
   if (ghostState.ghost.status !== 'none') {
@@ -5338,6 +5343,17 @@ document.addEventListener('visibilitychange', () => {
 
 // ─── Restore session on every page load ──────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  // iOS Safari viewport height fix — 100vh includes URL bar, so we measure actual visible height
+  function setAppHeight() {
+    const vh = window.innerHeight;
+    document.documentElement.style.setProperty('--app-height', vh + 'px');
+    const dp = document.querySelector('.dashboard-panel');
+    if (dp) dp.style.height = vh + 'px';
+  }
+  setAppHeight();
+  window.addEventListener('resize', setAppHeight);
+  window.addEventListener('orientationchange', () => setTimeout(setAppHeight, 150));
+
   const lastPage = loadSession();
   if (!lastPage) return;
   // Sync check: if localStorage cache says abandoned, set status immediately
