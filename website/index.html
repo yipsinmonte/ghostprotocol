@@ -982,6 +982,9 @@
     .db-form-grid { gap: 8px; }
     .db-form-group [id$="Preview"] { text-align: center !important; padding: 8px 0 !important; }
     .db-form-title { font-size: 16px; text-align: center; }
+
+    /* Prevent iOS zoom on input focus — minimum 16px */
+    input, select, textarea { font-size: 16px !important; }
     .db-info { text-align: center; font-size: 11px; line-height: 1.6; }
     .db-card { text-align: center; }
     .db-card-label { text-align: center; }
@@ -1026,8 +1029,15 @@
 
     /* ── Activity table ── */
     .db-table { font-size: 11px; }
-    .db-table th, .db-table td { padding: 8px 6px; }
+    .db-table th, .db-table td { padding: 8px 4px; }
     .db-table th:nth-child(3), .db-table td:nth-child(3) { display: none; }
+    .db-table th:nth-child(5), .db-table td:nth-child(5) { display: none; }
+    .db-table th:first-child, .db-table td:first-child { display: none; }
+    /* Prevent table overflow on mobile */
+    .db-form { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .db-table { min-width: 0; table-layout: auto; }
+    .db-table td:last-child, .db-table th:last-child { white-space: nowrap; padding: 8px 6px; }
+    .icon-btn { font-size: 11px; padding: 3px 6px; }
 
     /* ── Settings ── */
     .settings-current { flex-direction: column !important; }
@@ -3877,7 +3887,7 @@ async function fetchOnChainHistory() {
     if (builtActivity.length>0){
       const _chainSigs = new Set(builtActivity.map(e=>e.tx).filter(Boolean));
       const _localOnly = (ghostState.activityLog||[]).filter(e => e._local && (e._isBurn || (e.tx && !_chainSigs.has(e.tx))));
-      ghostState.activityLog = [..._localOnly, ...builtActivity];
+      ghostState.activityLog = [..._localOnly, ...builtActivity].sort((a,b) => (b.ts||0) - (a.ts||0));
       renderActivityLog();
       // Re-render execution detail now that _tokens are populated on log entries
       if (ghostState.ghost?.status === 'executed') renderExecutionDetail();
@@ -6310,7 +6320,7 @@ function renderBeneficiaries() {
 
       const wholeNoticeHtml = hasWholeVault ? `
         <div style="margin-top:4px;padding:14px 16px;background:linear-gradient(135deg,rgba(102,51,255,0.12),rgba(160,128,255,0.06));border:1px solid rgba(160,128,255,0.3);display:flex;align-items:center;gap:12px">
-          <span style="font-size:22px;flex-shrink:0">👻</span>
+          <span style="font-size:22px;flex-shrink:0">🪙</span>
           <div style="flex:1">
             <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:13px;color:#e0d0ff;margin-bottom:3px">Entire vault assigned</div>
             <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#c0bce0">100% → <span style="color:#c0a0ff;cursor:pointer" onclick="copyAddr('${wholeFullAddr}')" title="Click to copy">${wholeRecipient} ⧉</span> · All tokens transferred on execution</div>
@@ -6414,7 +6424,7 @@ function renderBeneficiaries() {
   if (wholeShares.length > 0) {
     rows += `<tr><td colspan="7" style="padding:12px 16px 8px;background:rgba(102,51,255,0.04);border-top:1px solid rgba(160,128,255,0.2);border-bottom:1px solid rgba(160,128,255,0.08)">
       <div style="display:flex;align-items:center;gap:8px">
-        <span style="font-size:16px">👻</span>
+        <span style="font-size:16px">🪙</span>
         <span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:rgba(160,128,255,0.8);letter-spacing:0.2em;text-transform:uppercase">Whole Vault Assignment</span>
       </div>
     </td></tr>`;
@@ -6422,7 +6432,7 @@ function renderBeneficiaries() {
       const realIdx = all.indexOf(ben);
       const isBurnAll = ben.wholeVaultAction === 1;
       const rowBg = isBurnAll ? 'rgba(255,61,90,0.04)' : 'rgba(102,51,255,0.03)';
-      const icon = isBurnAll ? '🔥' : '👻';
+      const icon = isBurnAll ? '🔥' : '🪙';
       const recipCell = isBurnAll
         ? `<div style="display:flex;flex-direction:column;gap:2px"><span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:rgba(255,100,100,0.5);letter-spacing:0.1em;text-transform:uppercase">no recipient</span><span style="font-family:'Syne',sans-serif;font-size:12px;color:rgba(255,80,80,0.7)">Entire vault burned</span></div>`
         : `<div style="display:flex;align-items:center;gap:5px"><span style="font-family:'Share Tech Mono',monospace;font-size:12px;color:#c0bce0;cursor:pointer" onclick="copyAddr('${ben.fullAddr||ben.recipient}')">${ben.recipient}</span><button onclick="copyAddr('${ben.fullAddr||ben.recipient}')" style="background:none;border:none;color:#443366;font-size:10px;cursor:pointer;padding:0 2px" onmouseover="this.style.color='#a080ff'" onmouseout="this.style.color='#443366'">⧉</button></div>`;
@@ -9316,7 +9326,8 @@ function renderVaultHoldings() {
 
     const assigned = wholeVaultPct >= 100 ? t.balance : vaultAssignedAmount(t.symbol, t.mint);
     const free = Math.max(0, +(t.balance - assigned).toFixed(9));
-    const isFullyAssigned = assigned >= t.balance - 0.000000001;
+    const tolerance = Math.max(0.000000001, t.balance * 0.001); // 0.1% or 1e-9, whichever is larger
+    const isFullyAssigned = assigned > 0 && assigned >= t.balance - tolerance;
     const isPartiallyAssigned = assigned > 0.000000001 && !isFullyAssigned;
 
     const badge = isFullyAssigned
@@ -9449,6 +9460,9 @@ async function confirmDepositAll() {
     ${feeWarning}
     <div style="margin-top:12px;padding:8px 10px;background:rgba(255,51,102,0.05);border:1px solid rgba(255,51,102,0.15);border-radius:3px;font-size:11px;color:#ff6688;line-height:1.5">
       🔒 Make sure you trust <strong>all tokens</strong> in your wallet. Malicious tokens with hidden extensions could pose risks.
+    </div>
+    <div style="margin-top:8px;padding:8px 10px;background:rgba(102,51,255,0.05);border:1px solid rgba(102,51,255,0.15);border-radius:3px;font-size:11px;color:#b0a0d0;line-height:1.5">
+      ℹ️ A small SOL transaction (~0.002 SOL) will be prompted for each new asset to create its vault account. This is normal Solana rent — each token needs its own on-chain account.
     </div>`;
 
   const ok = await ghostConfirm({ icon:'📥', title:'Deposit All Assets', html, okLabel:'DEPOSIT ALL' });
@@ -9604,7 +9618,7 @@ for (const item of validSpl.filter(m => !m.skip)) {
   splGroups[prog].push(item);
 }
 
-const BATCH_SIZE = 3;
+const BATCH_SIZE = 1;
 for (const [progStr, items] of Object.entries(splGroups)) {
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
     const batch = items.slice(i, i + BATCH_SIZE);
@@ -9877,7 +9891,7 @@ let ownerAta;
 const ownerAtaInfo = await connection.getAccountInfo(ownerAta);
 return { vt, withdrawMintPk, rawTokenProgPk, vaultAta, ownerAta, ownerAtaMissing: !ownerAtaInfo, feeBps };
 }));
-const BATCH_SIZE = 3;
+const BATCH_SIZE = 1;
 for (let i = 0; i < splMeta.length; i += BATCH_SIZE) {
 const batch = splMeta.slice(i, i + BATCH_SIZE);
 try {
@@ -10056,7 +10070,7 @@ for (const item of splMeta2) {
 }
 
 // SPL withdrawals — sign each batch individually
-const BATCH_SIZE = 3;
+const BATCH_SIZE = 1;
 for (const [, groupItems] of Object.entries(splGroups)) {
   for (let i = 0; i < groupItems.length; i += BATCH_SIZE) {
     const batch = groupItems.slice(i, i + BATCH_SIZE);
