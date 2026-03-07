@@ -1556,7 +1556,7 @@
             <div id="wholeVaultPreview" style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#c0bce0;margin-top:8px;min-height:14px"></div>
           </div>
           <button class="db-btn db-btn-primary" id="addTransferBtn" onclick="dbAddBeneficiary('transfer')">➕ Add Transfer</button>
-            <button class="db-btn db-btn-danger" id="clearAllBeneBtn" onclick="dbClearAllBeneficiaries()" style="display:none;margin-left:6px">🗑 Clear All</button>
+            <!-- Clear all removed — single clears are sufficient -->
           <div id="wholeVaultLockNotice" style="display:none;margin-top:10px;font-family:'Share Tech Mono',monospace;font-size:11px;color:#a080ff;background:rgba(102,51,255,0.06);border:1px solid rgba(160,128,255,0.2);padding:10px 12px">
             👻 Vault is fully assigned. Remove the whole-vault assignment to add specific transfers or burns.
           </div>
@@ -3028,23 +3028,7 @@ async function connectWallet(name) {
     ghostState.publicKey = pubkey;
     ghostState.provider = provider;
     const _onAccountChange = async (newPubkey) => {
-      // Wallet switched to different account — reload fresh state for new wallet
-      showNotif('👻 Wallet changed — loading new account…', '');
-      // Reset all ghost state
-      ghostState.ghost = { status:'none', lastHeartbeat:null, intervalSeconds:365*86400, gracePeriodSeconds:30*86400, awakenedAt:null, executed:false, stakedGhost:0, pingCount:0, vaultBalance:0, recoveryWallet:null, beneficiaries:[], wholeVaultAction:0 };
-      ghostState.walletTokens = [];
-      ghostState.vaultTokens = [];
-      ghostState.activityLog = [];
-      ghostState.pingHistory = [];
-      ghostState.recoveryWallets = [];
-      ghostState.selectedTokens = {};
-      ghostState.ghostPda = null;
-      ghostState.vaultPda = null;
-      ghostState.ghostStakeVault = null;
-      _walletIdentityAddr = null; // force identity card refresh
-      // If new pubkey provided, derive new PDAs and reload
-      // Phantom sometimes fires accountChanged with null/undefined when switching back to a prev account
-      // Fall back to reading provider.publicKey directly
+      // Resolve the new pubkey
       const resolvedPk = (() => {
         if (newPubkey) {
           const s = typeof newPubkey === 'string' ? newPubkey : newPubkey?.toBase58?.() || '';
@@ -3054,34 +3038,9 @@ async function connectWallet(name) {
       })();
       // If same wallet as before — no-op (tab switch / focus restore)
       if (resolvedPk && resolvedPk === ghostState.publicKey) return;
-
-      if (resolvedPk) {
-        const pk = resolvedPk;
-        if (pk) {
-          ghostState.publicKey = pk;
-          ghostState.walletAddress = pk.slice(0,4)+'...'+pk.slice(-4);
-          await deriveAndSetPDAs(pk);
-          saveSession();
-          // Update wallet UI elements with new address
-          const btn = document.getElementById('walletBtn');
-          if (btn) { btn.textContent = '● ' + ghostState.walletAddress; }
-          const panelAddr = document.getElementById('panelWalletAddr');
-          if (panelAddr) panelAddr.textContent = ghostState.walletAddress;
-          const wsEl = document.getElementById('walletStatus');
-          if (wsEl) wsEl.textContent = ghostState.walletAddress + ' — Heartbeat Active';
-          updateHeroGhostState();
-          // Reload ghost account for new wallet — await before updating UI
-          try { await fetchGhostAccount(); } catch(e) {}
-          await loadWalletTokens().catch(()=>{});
-          // Return to overview with fresh state
-          dbShowPage('overview', document.getElementById('nav-overview'));
-          updateDashboardUI();
-          updateHeroGhostState();
-          return;
-        }
-      }
-      // Could not resolve new pubkey — do nothing (tab switch, focus restore, etc.)
-      // Never auto-disconnect on ambiguous accountChanged events
+      // Different wallet — disconnect and prompt reconnect
+      showNotif('👻 Wallet changed — please reconnect.', '');
+      disconnectWallet();
     };
     ghostState._onAccountChange = _onAccountChange; // store ref for visibility check
     try { provider.off?.('accountChanged', _onAccountChange); provider.on?.('accountChanged', _onAccountChange); } catch(e) {}
@@ -3940,7 +3899,23 @@ async function fetchOnChainHistory() {
     });
     if (builtActivity.length>0){
       const _chainSigs = new Set(builtActivity.map(e=>e.tx).filter(Boolean));
-      const _localOnly = (ghostState.activityLog||[]).filter(e => e._local && (e._isBurn || (e.tx && !_chainSigs.has(e.tx))));
+      // Local entries use truncated sigs (e.g. "5t1T...XgMb") — match against full chain sigs by prefix+suffix
+      const _localOnly = (ghostState.activityLog||[]).filter(e => {
+        if (!e._local) return false;
+        if (e._isBurn) return true; // always keep local burn entries
+        if (!e.tx) return false;
+        // Check if any chain sig matches this local truncated sig
+        const localTx = e.tx;
+        if (_chainSigs.has(localTx)) return false; // exact match (full sig stored locally)
+        // Truncated match: "abcd...wxyz" → check chain sigs starting with "abcd" and ending with "wxyz"
+        if (localTx.includes('...')) {
+          const [pre, suf] = localTx.split('...');
+          for (const fullSig of _chainSigs) {
+            if (fullSig.startsWith(pre) && fullSig.endsWith(suf)) return false;
+          }
+        }
+        return true; // no chain match — keep local entry
+      });
       ghostState.activityLog = [..._localOnly, ...builtActivity].sort((a,b) => (b.ts||0) - (a.ts||0));
       renderActivityLog();
       // Re-render execution detail now that _tokens are populated on log entries
@@ -4866,9 +4841,7 @@ async function handleProfilePicSelect(input) {
     // Also update URL input so user sees what was stored
     const urlInput = document.getElementById('profilePicUrlInput');
     if (urlInput) urlInput.value = _pendingImageUri;
-    if (statusEl) { statusEl.textContent = '⟳ Upload done · saving on-chain...'; statusEl.style.color = '#c0a0ff'; }
-    // Auto-save on-chain immediately — no separate click needed
-    await dbSaveProfile();
+    if (statusEl) { statusEl.textContent = '✓ Uploaded · click Save to commit on-chain'; statusEl.style.color = '#33ff99'; }
   } catch(err) {
     if (statusEl) { statusEl.textContent = '✗ ' + (err.message || err); statusEl.style.color = '#ff6666'; }
     showNotif('Upload failed: ' + (err.message || err), 'error');
@@ -11646,7 +11619,7 @@ document.querySelectorAll('.nav-links a').forEach(a => {
   updateTrails();
 })();
 
-// ── GHOST COUNT GLOW on update ─────────────────────────────── 
+// ── GHOST COUNT GLOW on update ───────────────────────────────
 const _origFetchGhostCount = fetchGhostCount;
 </script>
 </body>
