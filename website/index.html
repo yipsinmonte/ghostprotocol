@@ -865,6 +865,7 @@
   /* ── Stats / Price ticker ── */
   @media (max-width: 768px) {
     .stats-wrap { padding: 20px 12px; }
+    .metrics-label { padding: 0 12px !important; font-size: 11px !important; }
     .stats { flex-direction: column; }
     .stat { padding: 24px 20px; border-right: none; border-bottom: 1px solid rgba(255,255,255,0.05); }
     .stat:last-child { border-bottom: none; }
@@ -1987,7 +1988,8 @@
 </div>
 
 <!-- PRICE TICKER -->
-<div class="stats-wrap reveal" style="margin-top:-10px">
+<span class="section-tag reveal metrics-label" style="max-width:1100px;margin:0 auto;display:block;padding:0 48px">§00 — Ghost Metrics</span>
+<div class="stats-wrap reveal" style="margin-top:12px">
   <div class="price-ticker">
     <div class="ticker-item"><span class="ticker-label">$GHOST Price</span><span class="ticker-value up" id="price">—</span></div>
     <div class="ticker-item"><span class="ticker-label">Market Cap</span><span class="ticker-value" id="mcap">—</span></div>
