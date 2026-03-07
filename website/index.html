@@ -6117,12 +6117,9 @@ async function renderExecutionDetail() {
       }
       return null;
     })();
-    const _solscanLink = _grpTx
-      ? ' <a href="https://solscan.io/tx/' + _grpTx + '" target="_blank" rel="noopener" style="font-family:monospace;font-size:9px;color:#7766aa;text-decoration:none;border:1px solid rgba(102,51,255,0.2);padding:1px 5px;margin-left:4px;vertical-align:middle" onmouseover="this.style.color=&quot;#aa88ff&quot;" onmouseout="this.style.color=&quot;#7766aa&quot;">&#x2197; solscan</a>'
-      : '';
     const destLabel = isBurn
-      ? '<span style="font-size:11px">&#x1F525;</span><span style="font-family:monospace;font-size:11px;color:#ff7755"> Burned</span>' + _solscanLink
-      : '<span style="font-size:10px;color:#5a5a7a">\u2192</span><span style="font-family:monospace;font-size:11px;color:#c0bce0" title="' + grp.recipientFull + '"> ' + grp.recipient + '</span>' + _solscanLink;
+      ? '<span style="font-size:11px">&#x1F525;</span><span style="font-family:monospace;font-size:11px;color:#ff7755"> Burned</span>'
+      : '<span style="font-size:10px;color:#5a5a7a">\u2192</span><span style="font-family:monospace;font-size:11px;color:#c0bce0" title="' + grp.recipientFull + '"> ' + grp.recipient + '</span>';
 
     html += '<div style="padding:16px 20px;' + borderB + '">'
           + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">'
