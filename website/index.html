@@ -127,7 +127,7 @@
     10%  { opacity: 0.5; }
     100% { width: 1100px; height: 1100px; opacity: 0; transform: translate(-50%,-50%) scale(1); }
   }
-  .hero-logo { width: 120px; height: 120px; margin-bottom: 20px; animation: fade-up 1s ease both; filter: drop-shadow(0 0 30px rgba(102,51,255,0.5)); }
+  .hero-logo { width: 120px; height: 120px; margin-bottom: 20px; animation: fade-up 1s ease both; filter: drop-shadow(0 0 30px rgba(102,51,255,0.5)); border-radius: 50%; -webkit-backface-visibility: hidden; }
   .hero-eyebrow { font-family: 'Share Tech Mono', monospace; font-size: 13px; letter-spacing: 0.4em; color: var(--muted); text-transform: uppercase; margin-bottom: 16px; animation: fade-up 1s ease 0.1s both; }
   .hero-eyebrow::before { content: '◈ '; }
   .hero-eyebrow::after { content: ' ◈'; }
@@ -841,20 +841,20 @@
   /* ── Hero section ── */
   @media (max-width: 768px) {
     .hero { padding: 40px 20px 60px; min-height: auto; }
-    .hero-logo { width: clamp(80px, 22vw, 120px); height: auto; margin-bottom: 14px !important; }
-    .hero-eyebrow { font-size: 8px; letter-spacing: 0.08em; margin-bottom: 8px; }
-    .hero-title { font-size: clamp(56px, 16vw, 90px) !important; margin-bottom: 24px !important; }
+    .hero-logo { width: clamp(110px, 30vw, 150px); height: auto; margin-bottom: 20px !important; }
+    .hero-eyebrow { font-size: 8px; letter-spacing: 0.08em; margin-bottom: 14px; }
+    .hero-title { font-size: clamp(64px, 17vw, 100px) !important; margin-bottom: 32px !important; margin-top: 6px; }
     .hero-title::before, .hero-title::after { display: none; }
     .hero-ticker { font-size: clamp(14px, 3vw, 18px); }
     .hero-sub { font-size: clamp(14px, 3vw, 18px); max-width: 90%; margin-bottom: 32px; }
-    .hero-actions { gap: 8px; }
+    .hero-actions { gap: 8px; margin-bottom: 16px; }
     .cta-btn { font-size: 11px; padding: 9px 18px; }
     .btn-register { font-size: 9px; padding: 10px 20px; letter-spacing: 0.1em; gap: 7px; }
     .btn-register-pulse { width: 5px; height: 5px; }
     .btn-register-icon { font-size: 11px; }
     .hero-secondary-btns { gap: 14px; }
     .btn-ghost-link { font-size: 8px; letter-spacing: 0.12em; }
-    .heartbeat-bar { padding: 0 10px; transform: scale(0.85); transform-origin: center top; }
+    .heartbeat-bar { padding: 0 10px; transform: scale(0.85); transform-origin: center top; margin-top: 40px; }
     .hb-label { font-size: 9px; letter-spacing: 0.15em; }
     /* Hide cursor trail on mobile */
     .cursor-trail { display: none !important; }
@@ -1103,7 +1103,7 @@
   /* ── Very small screens (< 400px) ── */
   @media (max-width: 400px) {
     .db-cards { grid-template-columns: 1fr !important; }
-    .hero-title { font-size: 42px !important; }
+    .hero-title { font-size: clamp(52px, 14.5vw, 72px) !important; }
     nav { padding: 10px 12px; }
     .contract-addr { max-width: 140px; }
     .panel-main { padding: 12px 8px 80px; }
