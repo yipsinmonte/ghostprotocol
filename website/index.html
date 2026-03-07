@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>GHOST — Your Digital Afterlife on Solana</title>
 <link rel="canonical" href="https://ghost-protocol.rip">
 <meta name="description" content="GHOST Protocol — trustless digital legacy on Solana. Vault your assets, set your beneficiaries, keep pinging. If you go silent, your ghost executes.">
@@ -938,6 +938,7 @@
       position: fixed; bottom: 0; left: 0; right: 0;
       z-index: 100;
       order: 2;
+      padding-bottom: env(safe-area-inset-bottom, 0px);
     }
     .sidebar-section-label { display: none; }
     .sidebar-footer-info { display: none; }
@@ -963,7 +964,7 @@
     .db-nav-item { overflow: hidden; text-overflow: ellipsis; max-width: 16.66%; }
     
     .panel-main { 
-      padding: 16px 16px 80px; /* 80px for single-row bottom nav */
+      padding: 16px 16px calc(80px + env(safe-area-inset-bottom, 0px)); /* 80px nav + safe area */
       order: 1;
     }
 
