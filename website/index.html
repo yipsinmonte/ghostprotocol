@@ -997,7 +997,7 @@
     .status-hero > div:first-child { width: 100%; }
     .status-hero > div:last-child { display: flex; flex-direction: column; align-items: center; }
     .status-eyebrow { text-align: center; }
-    .status-value { text-align: center; font-size: clamp(36px, 10vw, 48px); margin-bottom: 16px; }
+    .status-value { text-align: center; font-size: clamp(26px, 7.5vw, 44px); margin-bottom: 16px; }
     .status-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; width: 100%; margin-bottom: 16px; padding: 14px; background: rgba(102,51,255,0.04); border: 1px solid rgba(102,51,255,0.1); border-radius: 6px; }
     .status-meta-item { text-align: center; }
     .status-meta-item label { font-size: 9px; }
@@ -1220,6 +1220,12 @@
           <button onclick="dbMigrateAccount()" style="background:rgba(255,170,51,0.15);border:1px solid rgba(255,170,51,0.5);color:var(--amber);padding:10px 24px;border-radius:6px;cursor:pointer;font-family:'Share Tech Mono',monospace;font-size:12px;letter-spacing:0.1em">🔄 MIGRATE ACCOUNT</button>
         </div>
 
+        <!-- Grace period = 0 warning -->
+        <div id="graceZeroWarning" style="display:none;background:rgba(255,61,90,0.08);border:1px solid rgba(255,61,90,0.4);padding:16px 20px;margin-bottom:20px">
+          <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:14px;color:#ff5577;margin-bottom:6px">⚠️ No Grace Period Set</div>
+          <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#d08090;line-height:1.7">Your grace period is 0 — when your heartbeat expires, assets will be transferred to beneficiaries immediately with no cancellation window. Set a grace period in Settings if you want time to intervene.</div>
+        </div>
+
         <!-- Wallet identity -->
         <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;background:rgba(102,51,255,0.06);border:1px solid rgba(102,51,255,0.14);margin-bottom:20px">
           <!-- Avatar: profile pic if set, else identicon -->
@@ -1433,6 +1439,12 @@
       <div class="db-page" id="db-page-vault">
         <div class="db-page-title">Vault Assets</div>
         <div class="db-page-sub">Deposit · Withdraw · Manage</div>
+
+        <!-- Grace period = 0 warning -->
+        <div id="graceZeroWarningVault" style="display:none;background:rgba(255,61,90,0.08);border:1px solid rgba(255,61,90,0.4);padding:16px 20px;margin-bottom:20px">
+          <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:14px;color:#ff5577;margin-bottom:6px">⚠️ Immediate Execution</div>
+          <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#d08090;line-height:1.7">Grace period is 0 — vault assets will be transferred to beneficiaries immediately when your heartbeat expires. No cancellation window.</div>
+        </div>
 
         <!-- DEPOSIT -->
         <div class="db-form">
@@ -2944,14 +2956,25 @@ async function connectWallet(name) {
 
     let resp;
     if (_isInWalletBrowser) {
-      // Inside wallet app — try trusted connect first (no popup needed), fall back to untrusted
+      // Inside wallet app — try multiple approaches
       try {
         resp = await provider.connect({ onlyIfTrusted: true });
-      } catch(_) {
-        // Trusted failed — try without trust requirement
-        try { await provider.disconnect(); } catch(e) {}
-        await new Promise(r => setTimeout(r, 200));
-        resp = await provider.connect();
+      } catch(_e1) {
+        try {
+          resp = await provider.connect({ onlyIfTrusted: false });
+        } catch(_e2) {
+          try { await provider.disconnect(); } catch(e) {}
+          await new Promise(r => setTimeout(r, 500));
+          try {
+            resp = await provider.connect();
+          } catch(_e3) {
+            // All attempts failed — reload page to reset Phantom's internal state
+            showNotif('Reconnecting...', '');
+            await new Promise(r => setTimeout(r, 300));
+            window.location.reload();
+            return;
+          }
+        }
       }
     } else {
       // External browser — disconnect first to force approval popup
@@ -4421,6 +4444,13 @@ function updateDashboardUI() {
   const _migBanner = document.getElementById('overviewMigrationBanner');
   if (_migBanner) _migBanner.style.display = (isMigration || g._needsMigration) ? 'block' : 'none';
 
+  // Show/hide grace period = 0 warning
+  const _graceZero = (g.gracePeriodSeconds === 0 || g.graceSeconds === 0) && !isNone && g.status !== 'executed';
+  const _gzEl = document.getElementById('graceZeroWarning');
+  const _gzEl2 = document.getElementById('graceZeroWarningVault');
+  if (_gzEl) _gzEl.style.display = _graceZero ? 'block' : 'none';
+  if (_gzEl2) _gzEl2.style.display = _graceZero ? 'block' : 'none';
+
   // ── Sidebar nav lock/unlock ──────────────────────────────────
   const lockedIds = ['nav-vault','nav-beneficiaries','nav-heartbeat','nav-recovery','nav-settings'];
   lockedIds.forEach(id => {
@@ -5714,7 +5744,9 @@ function updateCountdown() {
     if (ghostState.ghost.status === 'alive') {
       ghostState.ghost.status = 'awakened';
       ghostState.ghost.awakened = true;
-      renderDashboard();
+      ghostState.ghost.awakenedAt = deadline;
+      updateDashboardUI();
+      updateHeroGhostState();
     }
 
     // Show grace period bar
@@ -5746,7 +5778,7 @@ function updateCountdown() {
   }
 }
 
-setInterval(updateCountdown, 30000);
+setInterval(updateCountdown, 5000);
 
 // ─── Ping ──────────────────────────────────────────────────────
 async function sendPing() {
@@ -6111,6 +6143,24 @@ async function renderExecutionDetail() {
       const pendingBadge = tk.status === 'pending'
         ? '<span style="font-size:9px;color:#5a5a7a;margin-left:auto;font-family:monospace">PENDING</span>'
         : '';
+      // Find per-token tx sig from activity log
+      const _tkTx = (() => {
+        for (const e of (ghostState.activityLog||[])) {
+          if (!e.tx || e.tx.length < 20) continue;
+          // Match by _tokens array containing this mint
+          if (e._tokens && tk.mint) {
+            if (e._tokens.some(t => t.mint === tk.mint)) return e.tx;
+          }
+          // Match by _mint
+          if (e._mint && tk.mint && e._mint === tk.mint) return e.tx;
+          // Match by symbol in msg
+          if (e.msg && tk.token && e.msg.includes(tk.token) && (isBurn ? e.msg.toLowerCase().includes('burn') : true)) return e.tx;
+        }
+        return _grpTx; // fallback to group tx
+      })();
+      const _tkSolscan = _tkTx
+        ? '<a href="https://solscan.io/tx/' + _tkTx + '" target="_blank" rel="noopener" style="font-family:monospace;font-size:8px;color:#7766aa;text-decoration:none;border:1px solid rgba(102,51,255,0.2);padding:1px 4px;margin-left:auto;flex-shrink:0" onmouseover="this.style.color=\'#aa88ff\'" onmouseout="this.style.color=\'#7766aa\'">↗</a>'
+        : '';
       html += '<div style="display:flex;align-items:center;gap:10px;padding:5px 0">'
             + '<div style="width:22px;height:22px;flex-shrink:0">' + logoHtml + '</div>'
             + '<div style="font-size:12px;color:#e0dcf8;font-family:monospace">'
@@ -6118,6 +6168,7 @@ async function renderExecutionDetail() {
             +   '<span style="color:' + tokenCol + '">' + tk.token + '</span>'
             + '</div>'
             + pendingBadge
+            + _tkSolscan
             + '</div>';
     }
 
