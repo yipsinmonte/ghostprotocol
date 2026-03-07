@@ -787,6 +787,311 @@
 
   /* ── WOW: Noise overlay ── */
   body::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 1; opacity: 0.025; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); background-size: 200px; }
+  /* ══════════════════════════════════════════════════════════════
+     MOBILE RESPONSIVE — only activates below 768px
+     Desktop layout is completely untouched
+     ══════════════════════════════════════════════════════════════ */
+
+  /* ── Mobile nav: hamburger menu ── */
+  @media (max-width: 768px) {
+    nav { padding: 14px 16px; gap: 8px; }
+    .nav-logo { font-size: 15px; letter-spacing: 0.15em; flex-shrink: 0; }
+    .nav-links { 
+      display: none; 
+      position: fixed; top: 54px; left: 0; right: 0; 
+      background: rgba(3,3,5,0.98); 
+      flex-direction: column; gap: 0; 
+      padding: 8px 0; 
+      border-bottom: 1px solid rgba(102,51,255,0.2);
+      z-index: 101;
+    }
+    .nav-links.mobile-open { display: flex; }
+    .nav-links li { border-bottom: 1px solid rgba(255,255,255,0.03); }
+    .nav-links a { display: block; padding: 14px 24px; font-size: 12px; }
+    .wallet-btn { font-size: 10px; padding: 6px 12px; }
+    #navDisconnectBtn { padding: 5px 8px !important; font-size: 10px !important; }
+    .mobile-hamburger {
+      display: flex; flex-direction: column; gap: 4px; 
+      background: none; border: none; cursor: pointer; padding: 6px;
+      margin-left: auto; margin-right: 0;
+    }
+    .mobile-hamburger span { display: block; width: 20px; height: 2px; background: #b0b0c8; border-radius: 1px; }
+  }
+  @media (min-width: 769px) {
+    .mobile-hamburger { display: none !important; }
+  }
+
+  /* ── Contract banner ── */
+  @media (max-width: 768px) {
+    .contract-banner { 
+      padding: 8px 12px; gap: 8px; margin-top: 54px; font-size: 11px; flex-wrap: wrap; justify-content: center;
+    }
+    .contract-addr { 
+      max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px;
+    }
+    .copy-btn { font-size: 10px; padding: 2px 8px; }
+  }
+
+  /* ── Hero section ── */
+  @media (max-width: 768px) {
+    .hero { padding: 40px 20px 60px; min-height: auto; }
+    .hero-logo { width: clamp(100px, 30vw, 160px); height: auto; }
+    .hero-eyebrow { font-size: 10px; letter-spacing: 0.12em; margin-bottom: 12px; }
+    .hero-title { font-size: clamp(48px, 14vw, 80px) !important; }
+    .hero-title::before, .hero-title::after { display: none; } /* hide glitch marks on mobile */
+    .hero-ticker { font-size: clamp(14px, 3vw, 18px); }
+    .hero-sub { font-size: clamp(14px, 3vw, 18px); max-width: 90%; margin-bottom: 32px; }
+    .hero-actions { gap: 12px; }
+    .cta-btn { font-size: 13px; padding: 12px 24px; }
+    .btn-register { font-size: 12px; padding: 14px 32px; letter-spacing: 0.15em; gap: 10px; }
+    .hero-secondary-btns { gap: 12px; }
+    .btn-ghost-link { font-size: 11px; }
+    .heartbeat-bar { padding: 0 10px; }
+    .hb-label { font-size: 11px; }
+    /* Hide cursor trail on mobile */
+    .cursor-trail { display: none !important; }
+    /* Hide ghost watermark on mobile */
+    .ghost-watermark { display: none; }
+  }
+
+  /* ── Stats / Price ticker ── */
+  @media (max-width: 768px) {
+    .stats-wrap { padding: 20px 12px; }
+    .stats { flex-direction: column; }
+    .stat { padding: 24px 20px; border-right: none; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .stat:last-child { border-bottom: none; }
+    .stat-value { font-size: 32px; }
+    .stat-label { font-size: 9px; letter-spacing: 0.25em; }
+    .price-ticker { padding: 12px 16px; gap: 16px; flex-wrap: wrap; font-size: 11px; }
+    .ticker-label { font-size: 10px; }
+    .ticker-value { font-size: 13px; }
+  }
+
+  /* ── Sections (protocol, manifesto, etc) ── */
+  @media (max-width: 768px) {
+    section { padding: 60px 24px !important; }
+    .section-title { font-size: clamp(28px, 6vw, 40px); text-align: center; }
+    .section-body { font-size: 14px; text-align: left; margin-left: auto; margin-right: auto; }
+    .section-divider { margin: 0 auto 48px; }
+    .manifesto blockquote { font-size: clamp(20px, 4vw, 32px); padding: 0 10px; text-align: center; }
+    .how-grid, .roadmap-grid, .actions-grid { grid-template-columns: 1fr !important; gap: 16px; }
+    .how-step h3, .road-card h3, .action-card h3 { text-align: center; }
+    .how-step p, .road-card li, .action-card p { text-align: left; }
+    .road-card { padding: 28px 20px; }
+    .road-card ul { padding-left: 0; }
+  }
+
+  /* ── Tokenomics ── */
+  @media (max-width: 768px) {
+    #tokenomics { padding: 60px 24px !important; }
+    .token-grid { grid-template-columns: 1fr !important; gap: 1px; }
+    .token-card { padding: 28px 24px; text-align: center; }
+    .token-card .stat-value, .token-card h3 { font-size: 36px; text-align: center; }
+    .token-card p { text-align: center; }
+  }
+
+  /* ── FAQ ── */
+  @media (max-width: 768px) {
+    .faq-q { font-size: 14px; padding: 14px 0; text-align: left; }
+    .faq-a p { font-size: 13px; text-align: left; }
+  }
+
+  /* ── CTA / Footer ── */
+  @media (max-width: 768px) {
+    .cta-title { font-size: clamp(28px, 7vw, 40px); }
+    .cta-sub { font-size: 14px; max-width: 90%; }
+    footer { flex-direction: column; gap: 12px; padding: 24px 20px; text-align: center; }
+    .footer-logo { font-size: 12px; }
+    .footer-mono { font-size: 10px; }
+    .footer-links { flex-wrap: wrap; gap: 16px; justify-content: center; }
+  }
+
+  /* ── Dashboard panel — mobile ── */
+  @media (max-width: 800px) {
+    .panel-topbar { padding: 0 12px; height: 50px; }
+    .panel-back { font-size: 11px; padding: 6px 10px; letter-spacing: 0.08em; white-space: nowrap; }
+    .panel-wallet { font-size: 11px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+    
+    /* Sidebar becomes bottom nav — single row, 5 items */
+    .panel-body { flex-direction: column; position: relative; }
+    .panel-sidebar { 
+      display: flex !important;
+      flex-direction: row;
+      width: 100%; 
+      overflow: hidden;
+      padding: 0; 
+      border-right: none;
+      border-top: 1px solid rgba(102,51,255,0.15);
+      background: #05050d;
+      position: fixed; bottom: 0; left: 0; right: 0;
+      z-index: 100;
+      order: 2;
+    }
+    .sidebar-section-label { display: none; }
+    .sidebar-footer-info { display: none; }
+    /* Hide non-essential nav items on mobile */
+    .db-nav-item[onclick*="watcher"] { display: none; }
+    .db-nav-item[onclick*="closeDashboard"] { display: none; }
+    .db-nav-item[onclick*="disconnectWallet"] { display: none; }
+    .db-nav-item[onclick*="heartbeat"] { display: none; }
+    .db-nav-item { 
+      flex: 1;
+      flex-direction: column; gap: 2px;
+      padding: 10px 4px; 
+      font-size: 9px; letter-spacing: 0.02em;
+      white-space: nowrap;
+      border-left: none;
+      text-align: center; justify-content: center;
+      display: flex; align-items: center;
+      border-top: 2px solid transparent;
+    }
+    .db-nav-item.active { border-left-color: transparent; border-top-color: #7744ff; background: rgba(102,51,255,0.08); }
+    .db-nav-icon { font-size: 18px; width: auto; }
+    
+    .panel-main { 
+      padding: 16px 16px 80px; /* 80px for single-row bottom nav */
+      order: 1;
+    }
+
+    /* ── Global mobile centering ── */
+    .db-page-title { font-size: clamp(20px, 5vw, 28px); text-align: center; }
+    .db-page-sub { font-size: 12px; text-align: center; }
+    .db-section-header { text-align: center; flex-direction: column; gap: 10px; align-items: center; }
+    .db-section-title { text-align: center; justify-content: center; }
+
+    /* Settings inputs - keep input+select on one row, centered preview */
+    .unit-input-row { flex-direction: row !important; }
+    .db-form-grid { gap: 8px; }
+    .db-form-group [id$="Preview"] { text-align: center !important; padding: 8px 0 !important; }
+    .db-form-title { font-size: 16px; text-align: center; }
+    .db-info { text-align: center; font-size: 11px; line-height: 1.6; }
+    .db-card { text-align: center; }
+    .db-card-label { text-align: center; }
+    .db-card-value { font-size: 22px; text-align: center; }
+    .db-card-sub { text-align: center; }
+    .db-form-group > label { display: block; text-align: center; font-size: 11px; }
+
+    /* ── Status hero ── */
+    .status-hero { grid-template-columns: 1fr !important; gap: 0; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px 16px; }
+    .status-hero > div:first-child { width: 100%; }
+    .status-hero > div:last-child { display: flex; flex-direction: column; align-items: center; }
+    .status-eyebrow { text-align: center; }
+    .status-value { text-align: center; font-size: clamp(36px, 10vw, 48px); margin-bottom: 16px; }
+    .status-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; width: 100%; margin-bottom: 16px; padding: 14px; background: rgba(102,51,255,0.04); border: 1px solid rgba(102,51,255,0.1); border-radius: 6px; }
+    .status-meta-item { text-align: center; }
+    .status-meta-item label { font-size: 9px; }
+    .status-meta-item span { font-size: 12px; }
+
+    /* ── Cards ── */
+    .db-cards { grid-template-columns: 1fr 1fr !important; gap: 8px; }
+    .db-card { padding: 14px 12px; }
+
+    /* ── Forms ── */
+    .db-form { padding: 18px 16px; }
+    .db-form-grid { grid-template-columns: 1fr !important; }
+    .token-picker-btn { padding: 10px 12px; }
+    .token-picker-dropdown { max-height: 250px; }
+    .tp-symbol { font-size: 13px; }
+    .tp-bal { font-size: 10px; }
+
+    /* ── Vault assets ── */
+    .vault-asset-row { flex-direction: column; align-items: center; gap: 8px; padding: 14px 16px; text-align: center; }
+    .vault-asset-symbol { justify-content: center !important; flex-wrap: wrap; }
+    .vault-asset-bal { text-align: center; }
+    .vault-asset-info { text-align: center; width: 100%; }
+    .vault-asset-actions { width: 100%; display: flex; gap: 6px; justify-content: center; }
+    .vault-asset-input { flex: 1; min-width: 0; }
+    .deposit-wallet-bal { display: none; }
+
+    /* ── Progress bars ── */
+    .db-progress-header { font-size: 11px; }
+
+    /* ── Activity table ── */
+    .db-table { font-size: 11px; }
+    .db-table th, .db-table td { padding: 8px 6px; }
+    .db-table th:nth-child(3), .db-table td:nth-child(3) { display: none; }
+
+    /* ── Settings ── */
+    .settings-current { flex-direction: column !important; }
+    .settings-current-item { border-right: none; border-bottom: 1px solid rgba(102,51,255,0.12); padding: 14px 20px; }
+    .settings-current-item:last-child { border-bottom: none; }
+    .settings-current-label { text-align: center; }
+    .settings-current-value { font-size: 20px; text-align: center; }
+    .settings-current-sub { font-size: 10px; text-align: center; }
+    .unit-input-row { flex-direction: column; }
+
+    /* ── Heartbeat orb ── */
+    .hb-orb-wrap { width: 100px !important; height: 100px !important; margin: 0 auto; }
+    .hb-orb-center { width: 56px !important; height: 56px !important; }
+    .hb-orb-label { text-align: center; width: 100%; }
+
+    /* ── Beneficiary rows ── */
+    .bene-row, [style*="display:flex"][style*="border-bottom"] { flex-wrap: wrap; justify-content: center; text-align: center; }
+
+    /* Deposit buttons centered and stacked */
+    .deposit-btns-wrap { flex-direction: column !important; align-items: center; }
+    .deposit-btns-wrap .db-btn { width: 100%; }
+
+    /* ── Buttons — action buttons full width centered, MAX stays compact ── */
+    .db-btn { display: flex; justify-content: center; }
+    .db-btn-primary, .db-btn-danger { width: 100%; justify-content: center; }
+    /* Outline buttons that are standalone (not inline MAX) get full width */
+    .db-form > .db-btn-outline,
+    .db-form > div > .db-btn-outline:only-child { width: 100%; }
+    /* MAX and inline small buttons stay compact */
+    div[style*="display:flex"] > .db-btn-outline { width: auto; flex-shrink: 0; padding: 7px 12px; font-size: 11px; }
+
+    /* ── Modals ── */
+    #ghostConfirmModal > div { max-width: 92vw !important; padding: 28px 20px !important; }
+    .notif { font-size: 12px; padding: 12px 20px; max-width: 90vw; white-space: normal; bottom: 90px; }
+
+    /* ── Vault overview on dashboard — center USD total ── */
+    #dbVaultUsdTotal { text-align: center !important; font-size: 26px !important; padding: 14px 16px 4px !important; }
+    #dbVaultUsdSub { text-align: center !important; padding: 0 16px 12px !important; }
+    
+    /* ── Vault holdings page — center totals ── */
+    #vaultHoldingsUsdTotal { text-align: center !important; font-size: 26px !important; }
+    #vaultHoldingsUsdSub { text-align: center !important; }
+    
+    /* ── Beneficiary allocation summary — center ── */
+    #beneVaultOverview [style*="space-between"] { flex-direction: column !important; align-items: center !important; gap: 8px !important; }
+    #beneVaultOverview [style*="text-align:right"] { text-align: center !important; }
+    
+    /* ── What happens next / if you go silent — center steps ── */
+    .db-form > div > div[style*="gap:18px"] { flex-direction: column !important; align-items: center !important; text-align: center; gap: 12px !important; }
+    .db-form > div > div[style*="gap:18px"] > div:last-child { text-align: center; }
+    .db-form > div > div[style*="gap:18px"] [style*="line-height:1.7"] { line-height: 1.9 !important; margin-top: 8px; }
+
+    /* ── Summon ghost config — stack label above input on mobile ── */
+    #db-page-init [style*="justify-content:space-between"][style*="gap:20px"] { 
+      flex-direction: column !important; 
+      align-items: center !important; 
+      text-align: center; 
+      gap: 12px !important; 
+    }
+    #initStakeSection [style*="justify-content:space-between"] {
+      flex-direction: column !important;
+      align-items: center !important;
+      text-align: center;
+      gap: 12px !important;
+    }
+
+    /* ── Global side margins ── */
+    .panel-main { padding: 16px 20px 80px !important; }
+
+    /* ── Profile card ── */
+    .ghost-profile-card, [style*="border-radius:12px"][style*="align-items:center"] { text-align: center; }
+  }
+
+  /* ── Very small screens (< 400px) ── */
+  @media (max-width: 400px) {
+    .db-cards { grid-template-columns: 1fr !important; }
+    .hero-title { font-size: 42px !important; }
+    nav { padding: 10px 12px; }
+    .contract-addr { max-width: 140px; }
+    .panel-main { padding: 12px 8px 80px; }
+    .stat-value { font-size: 28px; }
+  }
 
 </style>
 <!-- Solana Web3.js - loaded async so it doesn't block page -->
@@ -1126,10 +1431,10 @@
                 <button class="db-btn db-btn-outline" type="button" style="padding:7px 12px;font-size:11px;white-space:nowrap;flex-shrink:0" onclick="fillMaxDeposit()">MAX</button>
               </div>
             </div>
-            <div class="db-form-group"><label>Available in Wallet</label><input type="text" id="depositBalance" value="—" readonly style="color:#c0bce0"></div>
+            <div class="db-form-group deposit-wallet-bal"><label>Available in Wallet</label><input type="text" id="depositBalance" value="—" readonly style="color:#c0bce0"></div>
           </div>
           <div id="depositFeeNotice" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(255,144,64,0.08);border:1px solid rgba(255,144,64,0.25);border-radius:4px;font-family:'Share Tech Mono',monospace;font-size:11px;color:#ff9040;line-height:1.5"></div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div style="display:flex;gap:10px;flex-wrap:wrap" class="deposit-btns-wrap">
             <button class="db-btn db-btn-primary" onclick="dbDeposit()">📥 Deposit to Vault</button>
             <button class="db-btn db-btn-outline" onclick="confirmDepositAll()" title="Deposit all wallet assets at max balance">📥 Deposit All Assets</button>
           </div>
@@ -1148,7 +1453,6 @@
         </div>
         <div id="vaultHoldingsUsdTotal" style="font-family:'Syne',sans-serif;font-weight:800;font-size:32px;color:#33ff99;letter-spacing:-0.02em;padding:18px 20px 4px;line-height:1"></div>
         <div id="vaultHoldingsUsdSub" style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.2em;color:#c0bce0;text-transform:uppercase;padding:0 20px 16px;display:none">Total vault value · live prices</div>
-        <div class="db-info" style="margin-bottom:12px">Each asset can be withdrawn individually back to your wallet. Withdrawals are blocked while your ghost is awakened.</div>
         <div id="vaultHoldingsList" style="border:1px solid rgba(102,51,255,0.12);margin-bottom:20px">
           <div style="padding:24px;text-align:center;font-family:'Share Tech Mono',monospace;font-size:12px;color:#c0bce0">No assets in vault yet.</div>
         </div>
@@ -1159,7 +1463,7 @@
         <div class="db-page-title">Beneficiaries</div>
         <div class="db-page-sub">Who receives your digital legacy when your ghost executes</div>
 
-        <!-- VAULT ALLOCATION OVERVIEW -->
+        <!-- VAULT ALLOCATION OVERVIEW — token graphs only, no summary totals -->
         <div id="beneVaultOverview" style="margin-bottom:20px"></div>
 
         <!-- BENEFICIARY LIST -->
@@ -1177,7 +1481,6 @@
         <!-- ADD SPECIFIC TRANSFER -->
         <div class="db-form">
           <div class="db-form-title">➕ Add Transfer</div>
-          <div class="db-info">Assign a specific token amount from your vault to a recipient wallet.</div>
           <div class="db-form-group" style="margin-bottom:14px">
             <label>Recipient Wallet Address</label>
             <input type="text" id="newRecipient" placeholder="Solana address (base58)">
@@ -1237,10 +1540,8 @@
             </div>
           </div>
           <div class="db-form-group" style="margin-bottom:14px">
-            <div id="burnAmountNote" style="padding:10px 14px;background:rgba(255,61,90,0.06);border:1px solid rgba(255,61,90,0.2);border-radius:4px;font-family:'Share Tech Mono',monospace;font-size:11px;color:#ff8899;line-height:1.5">
-              🔥 Burns <strong>100%</strong> of this token's vault balance on execution. The contract burns the entire token account — partial burns are not supported.
-            </div>
             <input type="hidden" id="burnAmount" value="0">
+            <div id="burnAmountNote" style="display:none"></div>
           </div>
           <button class="db-btn db-btn-danger" id="addBurnBtn" onclick="dbAddBeneficiary('burn')">🔥 Add Burn Instruction</button>
         </div>
@@ -1250,7 +1551,6 @@
       <div class="db-page" id="db-page-heartbeat">
         <div class="db-page-title">Heartbeat</div>
         <div class="db-page-sub">Stay alive · Prove you're here</div>
-        <div class="db-info">Ping before your interval expires. If you go silent, your grace period activates — giving your recovery wallet one last chance to cancel before execution.</div>
         <div class="db-form" style="text-align:center;padding:48px 40px 40px;position:relative;overflow:hidden">
           <!-- ambient glow -->
           <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-60%);width:320px;height:320px;border-radius:50%;background:radial-gradient(circle,rgba(102,51,255,0.08) 0%,transparent 70%);pointer-events:none"></div>
@@ -1310,26 +1610,15 @@
         <!-- GHOST PROFILE -->
         <div class="db-form" id="profileSettingsForm">
           <div class="db-form-title">👻 Ghost Profile</div>
-          <div class="db-info">Set a display name and profile picture. Stored on-chain in your ghost account.</div>
-          <div style="display:flex;align-items:flex-start;gap:20px;margin-bottom:20px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:12px;margin-bottom:20px">
             <div style="position:relative;flex-shrink:0">
-              <div id="profilePicPreview" style="width:72px;height:72px;border-radius:50%;background:rgba(102,51,255,0.15);border:2px solid rgba(102,51,255,0.3);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:28px">👻</div>
+              <div id="profilePicPreview" style="width:88px;height:88px;border-radius:50%;background:rgba(102,51,255,0.15);border:2px solid rgba(102,51,255,0.3);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:36px">👻</div>
               <input type="file" id="profilePicInput" accept="image/png,image/jpeg,image/jpg,image/heic,image/heif,image/webp" style="display:none" onchange="handleProfilePicSelect(this)">
-              <button onclick="document.getElementById('profilePicInput').click()" style="position:absolute;bottom:-4px;right:-4px;width:24px;height:24px;border-radius:50%;background:#6633ff;border:2px solid #1a1028;color:#fff;font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0">+</button>
+              <button onclick="document.getElementById('profilePicInput').click()" style="position:absolute;bottom:-2px;right:-2px;width:28px;height:28px;border-radius:50%;background:#6633ff;border:2px solid #1a1028;color:#fff;font-size:16px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0">+</button>
             </div>
-            <div style="flex:1">
-              <div id="profilePicStatus" style="font-family:'Share Tech Mono',monospace;font-size:11px;color:#9090b8;margin-bottom:8px">No image set · click + to upload</div>
-              <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:rgba(102,51,255,0.45);margin-bottom:8px">PNG · JPEG · WEBP · uploads and saves on-chain automatically</div>
-              <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#6868a0;margin-bottom:4px">Or paste a direct URL:</div>
-              <div style="display:flex;gap:6px;align-items:center">
-                <input type="text" id="profilePicUrlInput" placeholder="https://sapphire-casual-python-864.mypinata.cloud/ipfs/..." maxlength="128"
-                  style="flex:1;background:rgba(10,8,20,0.7);border:1px solid rgba(102,51,255,0.2);color:#e0dcf8;font-family:'Share Tech Mono',monospace;font-size:11px;padding:7px 10px;outline:none;box-sizing:border-box"
-                  oninput="handleProfileUrlInput(this.value)">
-                <button onclick="fetchLatestPinataUpload()" title="Fetch your latest upload from Pinata"
-                  style="background:rgba(102,51,255,0.15);border:1px solid rgba(102,51,255,0.3);color:#c0a0ff;font-family:'Share Tech Mono',monospace;font-size:10px;padding:7px 10px;cursor:pointer;white-space:nowrap;letter-spacing:0.05em;transition:all 0.2s"
-                  onmouseover="this.style.background='rgba(102,51,255,0.3)'" onmouseout="this.style.background='rgba(102,51,255,0.15)'">⟳ latest pin</button>
-              </div>
-            </div>
+            <div id="profilePicStatus" style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#9090b8;text-align:center">Tap + to upload</div>
+            <!-- Hidden URL input kept for JS compatibility -->
+            <input type="hidden" id="profilePicUrlInput" value="">
           </div>
           <div class="db-form-group" style="margin-bottom:16px">
             <label>Display Name <span style="color:#6868a0;font-size:10px">(max 32 chars, stored on-chain)</span></label>
@@ -1361,7 +1650,6 @@
 
         <div class="db-form">
           <div class="db-form-title">⏱️ Update Heartbeat Interval</div>
-          <div class="db-info">Minimum 1 hour. This is how long you have between pings before your ghost awakens.</div>
           <div class="db-form-grid">
             <div class="db-form-group">
               <label>New Interval</label>
@@ -1374,17 +1662,13 @@
                 </select>
               </div>
             </div>
-            <div class="db-form-group">
-              <label>Preview</label>
-              <div style="font-family:'Share Tech Mono',monospace;font-size:13px;color:var(--accent);padding:11px 0" id="dbIntervalPreview">Enter value above</div>
-            </div>
+            <div id="dbIntervalPreview" style="font-family:'Share Tech Mono',monospace;font-size:13px;color:var(--accent);padding:8px 0;text-align:center"></div>
           </div>
           <button class="db-btn db-btn-primary" onclick="dbUpdateInterval()">⏱️ Update Interval</button>
         </div>
 
         <div class="db-form">
           <div class="db-form-title">⏳ Update Grace Period</div>
-          <div class="db-info">Minimum 0 (0 = instant execution). After your ghost awakens, this is your window to cancel via ping or recovery wallet.</div>
           <div class="db-form-grid">
             <div class="db-form-group">
               <label>New Grace Period</label>
@@ -1397,10 +1681,7 @@
                 </select>
               </div>
             </div>
-            <div class="db-form-group">
-              <label>Preview</label>
-              <div style="font-family:'Share Tech Mono',monospace;font-size:13px;color:var(--accent);padding:11px 0" id="dbGracePreview">Enter value above</div>
-            </div>
+            <div id="dbGracePreview" style="font-family:'Share Tech Mono',monospace;font-size:13px;color:var(--accent);padding:8px 0;text-align:center"></div>
           </div>
           <button class="db-btn db-btn-primary" onclick="dbUpdateGrace()">⏳ Update Grace Period</button>
         </div>
@@ -1428,7 +1709,6 @@
 
         <div class="db-form">
           <div class="db-form-title">⚙️ Configure Your Ghost</div>
-          <div class="db-info">Your ghost executes automatically when you go silent. All settings can be changed after initialization.</div>
 
           <div style="display:flex;flex-direction:column;gap:20px;margin-bottom:24px">
 
@@ -1475,11 +1755,11 @@
                 </div>
               </div>
               <div id="stakeWarning" style="display:none;font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--red);margin-bottom:10px">⚠️ Minimum 10,000 $GHOST required to summon</div>
-              <div style="font-family:'Share Tech Mono',monospace;font-size:12px;color:rgba(255,120,100,0.85);line-height:1.7;margin-top:4px">
-                ⚠️ <strong>Stake costs:</strong><br>
-                · <strong>50% burn</strong> if you abandon your ghost<br>
-                · <strong>~5% bounty</strong> deducted each time your heartbeat expires and an executor bot awakens your ghost — even if you cancel the awakening afterwards. Multiple expirations = multiple deductions.<br>
-                · Keep your heartbeat alive to preserve your full stake.
+              <div style="font-family:'Share Tech Mono',monospace;font-size:11px;color:rgba(255,120,100,0.85);line-height:1.9;margin-top:8px;padding:12px 14px;background:rgba(255,61,90,0.04);border:1px solid rgba(255,61,90,0.12);border-radius:4px">
+                ⚠️ <strong>Stake costs:</strong><br><br>
+                · <strong>50% burn</strong> — if you abandon your ghost<br><br>
+                · <strong>~5% bounty</strong> — deducted each time your heartbeat expires and an executor bot awakens your ghost, even if you cancel afterwards<br><br>
+                · Keep your heartbeat alive to preserve your full stake
               </div>
             </div>
 
@@ -1490,10 +1770,6 @@
             <span style="font-family:'Share Tech Mono',monospace;font-size:13px;color:#b0b0c8">Ghost awakens after</span>
             <span style="font-family:'Syne',sans-serif;font-weight:800;font-size:18px;color:#f0f0f8" id="initPreview">1 year</span>
             <span style="font-family:'Share Tech Mono',monospace;font-size:13px;color:#b0b0c8">of silence</span>
-          </div>
-
-          <div style="font-family:'Share Tech Mono',monospace;font-size:13px;color:#b0a8d0;margin-bottom:20px;padding:12px 16px;border-left:3px solid rgba(102,51,255,0.4)">
-            ~0.01 SOL for on-chain account rent · Wallet signature required
           </div>
 
           <button class="db-btn db-btn-primary" style="width:100%;padding:18px;font-size:15px;justify-content:center" onclick="initializeGhost()">
@@ -1563,7 +1839,6 @@
 
         <!-- CHECK PULSE MODE -->
         <div id="watcherPanelObserve">
-          <div class="db-info" style="margin-bottom:20px">Enter any Solana wallet to see their ghost status, last heartbeat, and time remaining.</div>
           <div class="db-form-group" style="margin-bottom:14px">
             <label>Wallet Address</label>
             <input type="text" id="soulToCheck" placeholder="Enter any Solana wallet address...">
@@ -1630,6 +1905,7 @@
   </ul>
   <button class="wallet-btn" id="walletBtn" onclick="openModal()">Connect Wallet</button>
   <button id="navDisconnectBtn" onclick="disconnectWallet()" style="display:none;font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:0.1em;color:#ff6666;background:none;border:1px solid rgba(255,102,102,0.3);padding:6px 12px;cursor:pointer;margin-left:8px;transition:all 0.2s" onmouseover="this.style.background='rgba(255,102,102,0.1)'" onmouseout="this.style.background='none'" title="Disconnect wallet">⏻</button>
+  <button class="mobile-hamburger" onclick="document.querySelector('.nav-links').classList.toggle('mobile-open')"><span></span><span></span><span></span></button>
 </nav>
 
 <!-- CONTRACT BANNER -->
@@ -2580,9 +2856,9 @@ async function connectWallet(name) {
   } else if (name === 'OKX') {
     provider = window.okxwallet?.solana;
   }
-  // No silent fallthrough — if the chosen wallet isn't installed, say so clearly
+  // No silent fallthrough — if the chosen wallet isn't installed, fall back to demo mode
   if (!provider) {
-    showNotif('\u26A0\uFE0F ' + name + ' not detected. Please install it and refresh.', 'error');
+    connectWalletDemo(name);
     return;
   }
   try {
@@ -4472,7 +4748,7 @@ function handleProfileUrlInput(val) {
   } else if (trimmed === '') {
     _pendingImageUri = '';
     if (previewEl) previewEl.innerHTML = '👻';
-    if (statusEl) { statusEl.textContent = 'No image set — click + to upload'; statusEl.style.color = '#9090b8'; }
+    if (statusEl) { statusEl.textContent = 'Tap + to upload'; statusEl.style.color = '#9090b8'; }
   } else {
     _pendingImageUri = '';
     if (statusEl) { statusEl.textContent = '⚠️ Must start with https://'; statusEl.style.color = '#ff6666'; }
@@ -5952,13 +6228,6 @@ function renderBeneficiaries() {
       const summaryColor = totalAssignedPct >= 100 ? '#33ff99' : totalAssignedPct > 0 ? '#ff9933' : 'var(--muted)';
 
       ovEl.innerHTML = `<div style="margin-bottom:16px">
-        <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px">
-          <div>
-            <div style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:0.2em;color:#c0bce0;text-transform:uppercase;margin-bottom:4px">Vault Allocation</div>
-            <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:22px;color:${summaryColor};line-height:1">${totalAssignedPct}% <span style="font-size:13px;font-weight:400;color:#c0bce0">assigned</span></div>
-          </div>
-          ${totalUsdVault > 0 ? `<div style="text-align:right"><div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:#c0bce0;margin-bottom:2px">vault value</div><div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;color:#33ff99">$${totalUsdVault.toLocaleString(undefined,{maximumFractionDigits:2})}</div></div>` : ''}
-        </div>
         ${tokenCards}${wholeNoticeHtml}
       </div>`;
     }
@@ -8983,7 +9252,7 @@ function renderVaultHoldings() {
     <div class="vault-asset-row" data-mint="${t.mint}" style="${isFullyAssigned ? 'opacity:0.78;background:rgba(160,128,255,0.025)' : ''}">
       <div class="vault-asset-icon" style="background:none;overflow:hidden" data-logo="${t.mint}">${tokenLogoEl(t.symbol, 36, t.logoUrl||null)}</div>
       <div class="vault-asset-info">
-        <div class="vault-asset-symbol" style="display:flex;align-items:center;gap:8px">${t.symbol}${feeBadge}${badge}<button onclick="excludeVaultMint('${t.mint}')" title="Hide this token from vault" style="background:none;border:none;color:#50406a;font-size:10px;cursor:pointer;padding:1px 3px;font-family:'Share Tech Mono',monospace;line-height:1;flex-shrink:0" onmouseover="this.style.color='#ff6688'" onmouseout="this.style.color='#50406a'">✕ hide</button></div>
+        <div class="vault-asset-symbol" style="display:flex;align-items:center;gap:8px">${t.symbol}${feeBadge}${badge}</div>
         <div class="vault-asset-bal" data-bal="${t.mint}">${t.balance.toLocaleString(undefined,{maximumFractionDigits:6})} ${t.symbol} in vault${usdStr}${freeNote}</div>
         ${feeWithdrawNote}
       </div>
@@ -11092,6 +11361,13 @@ async function dbAbandon(skipConfirm, onChain, wasExecuted) {
     </div>
   </div>
 </div>
+
+<script>
+// ── MOBILE NAV — close menu on link click ──
+document.querySelectorAll('.nav-links a').forEach(a => {
+  a.addEventListener('click', () => document.querySelector('.nav-links')?.classList.remove('mobile-open'));
+});
+</script>
 
 <script>
 // ── PARTICLES ────────────────────────────────────────────────
