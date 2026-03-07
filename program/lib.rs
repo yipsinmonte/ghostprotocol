@@ -771,21 +771,21 @@ pub struct InitializeGhost<'info> {
 #[derive(Accounts)]
 pub struct Ping<'info> {
     #[account(mut, seeds = [GHOST_SEED, signer.key().as_ref()], bump = ghost.bump, constraint = ghost.owner == signer.key() @ GhostError::Unauthorized)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     #[account(mut)] pub signer: Signer<'info>,
 }
 
 #[derive(Accounts)]
 pub struct ManageBeneficiaries<'info> {
     #[account(mut, seeds = [GHOST_SEED, signer.key().as_ref()], bump = ghost.bump, constraint = ghost.owner == signer.key() @ GhostError::Unauthorized)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     #[account(mut)] pub signer: Signer<'info>,
 }
 
 #[derive(Accounts)]
 pub struct GuardianManageBeneficiaries<'info> {
     #[account(mut, seeds = [GHOST_SEED, owner.key().as_ref()], bump = ghost.bump)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     /// CHECK: Owner pubkey — PDA derivation only
     pub owner: UncheckedAccount<'info>,
     #[account(mut)] pub recovery_wallet: Signer<'info>,
@@ -794,14 +794,14 @@ pub struct GuardianManageBeneficiaries<'info> {
 #[derive(Accounts)]
 pub struct AcceptOwnership<'info> {
     #[account(mut, seeds = [GHOST_SEED, ghost.owner.as_ref()], bump = ghost.bump)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     #[account(mut)] pub new_owner: Signer<'info>,
 }
 
 #[derive(Accounts)]
 pub struct CheckSilence<'info> {
     #[account(mut, seeds = [GHOST_SEED, ghost.owner.as_ref()], bump = ghost.bump)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     #[account(mut)] pub caller: Signer<'info>,
     pub ghost_mint: InterfaceAccount<'info, Mint>,
     #[account(mut, token::mint = ghost_mint, token::token_program = token_program)]
@@ -814,21 +814,21 @@ pub struct CheckSilence<'info> {
 #[derive(Accounts)]
 pub struct CancelAwakening<'info> {
     #[account(mut, seeds = [GHOST_SEED, ghost.owner.as_ref()], bump = ghost.bump)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     #[account(mut)] pub signer: Signer<'info>,
 }
 
 #[derive(Accounts)]
 pub struct ExecuteLegacy<'info> {
     #[account(mut, seeds = [GHOST_SEED, ghost.owner.as_ref()], bump = ghost.bump)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     pub caller: Signer<'info>,
 }
 
 #[derive(Accounts)]
 pub struct ExecuteTransfer<'info> {
     #[account(mut, seeds = [GHOST_SEED, ghost.owner.as_ref()], bump = ghost.bump)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     /// CHECK: Vault PDA authority
     #[account(seeds = [VAULT_SEED, ghost.owner.as_ref()], bump = ghost.vault_bump)]
     pub vault: UncheckedAccount<'info>,
@@ -849,7 +849,7 @@ pub struct ExecuteTransfer<'info> {
 #[derive(Accounts)]
 pub struct ExecuteWholeVaultTransfer<'info> {
     #[account(mut, seeds = [GHOST_SEED, ghost.owner.as_ref()], bump = ghost.bump)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     /// CHECK: Vault PDA authority
     #[account(seeds = [VAULT_SEED, ghost.owner.as_ref()], bump = ghost.vault_bump)]
     pub vault: UncheckedAccount<'info>,
@@ -870,7 +870,7 @@ pub struct ExecuteWholeVaultTransfer<'info> {
 #[derive(Accounts)]
 pub struct ExecuteWholeVaultBurn<'info> {
     #[account(mut, seeds = [GHOST_SEED, ghost.owner.as_ref()], bump = ghost.bump)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     /// CHECK: Vault PDA authority
     #[account(seeds = [VAULT_SEED, ghost.owner.as_ref()], bump = ghost.vault_bump)]
     pub vault: UncheckedAccount<'info>,
@@ -884,7 +884,7 @@ pub struct ExecuteWholeVaultBurn<'info> {
 #[derive(Accounts)]
 pub struct ExecuteBurn<'info> {
     #[account(mut, seeds = [GHOST_SEED, ghost.owner.as_ref()], bump = ghost.bump)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     /// CHECK: Vault PDA authority
     #[account(seeds = [VAULT_SEED, ghost.owner.as_ref()], bump = ghost.vault_bump)]
     pub vault: UncheckedAccount<'info>,
@@ -898,7 +898,7 @@ pub struct ExecuteBurn<'info> {
 #[derive(Accounts)]
 pub struct DepositToVault<'info> {
     #[account(seeds = [GHOST_SEED, signer.key().as_ref()], bump = ghost.bump, constraint = ghost.owner == signer.key() @ GhostError::Unauthorized)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     #[account(mut)] pub signer: Signer<'info>,
     pub ghost_mint: InterfaceAccount<'info, Mint>,
     #[account(mut, token::mint = ghost_mint, token::token_program = token_program)]
@@ -911,7 +911,7 @@ pub struct DepositToVault<'info> {
 #[derive(Accounts)]
 pub struct WithdrawFromVault<'info> {
     #[account(seeds = [GHOST_SEED, signer.key().as_ref()], bump = ghost.bump, constraint = ghost.owner == signer.key() @ GhostError::Unauthorized)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     /// CHECK: Vault PDA authority
     #[account(seeds = [VAULT_SEED, signer.key().as_ref()], bump = ghost.vault_bump)]
     pub vault: UncheckedAccount<'info>,
@@ -927,7 +927,7 @@ pub struct WithdrawFromVault<'info> {
 #[derive(Accounts)]
 pub struct RecoveryWithdraw<'info> {
     #[account(mut, seeds = [GHOST_SEED, owner.key().as_ref()], bump = ghost.bump)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     /// CHECK: Owner pubkey — PDA derivation
     pub owner: UncheckedAccount<'info>,
     /// CHECK: Vault PDA
@@ -945,14 +945,14 @@ pub struct RecoveryWithdraw<'info> {
 #[derive(Accounts)]
 pub struct UpdateSettings<'info> {
     #[account(mut, seeds = [GHOST_SEED, signer.key().as_ref()], bump = ghost.bump, constraint = ghost.owner == signer.key() @ GhostError::Unauthorized)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     #[account(mut)] pub signer: Signer<'info>,
 }
 
 #[derive(Accounts)]
 pub struct AbandonGhost<'info> {
     #[account(mut, seeds = [GHOST_SEED, signer.key().as_ref()], bump = ghost.bump, constraint = ghost.owner == signer.key() @ GhostError::Unauthorized, close = signer)]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     #[account(mut)] pub signer: Signer<'info>,
     pub ghost_mint: InterfaceAccount<'info, Mint>,
     #[account(mut, token::mint = ghost_mint, token::token_program = token_program)]
@@ -973,7 +973,7 @@ pub struct MigrateGhost<'info> {
         bump = ghost.bump,
         constraint = ghost.owner == signer.key() @ GhostError::Unauthorized,
     )]
-    pub ghost: Account<'info, GhostAccount>,
+    pub ghost: Box<Account<'info, GhostAccount>>,
     #[account(mut)] pub signer: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
