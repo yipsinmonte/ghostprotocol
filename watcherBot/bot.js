@@ -499,6 +499,7 @@ async function ensureFeeTokenAccount(mintPk, tokenProg) {
         { pubkey: mintPk,              isSigner: false, isWritable: false },
         { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false },
         { pubkey: tokenProg,           isSigner: false, isWritable: false },
+        { pubkey: new PublicKey('SysvarRent111111111111111111111111111111111'), isSigner: false, isWritable: false },
       ],
       data: Buffer.from([1]), // CreateIdempotent
     });
@@ -628,6 +629,7 @@ async function ensureRecipientTokenAccount(ownerPk, mintPk, tokenProg) {
         { pubkey: mintPk,          isSigner: false, isWritable: false },
         { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false },
         { pubkey: tokenProg,       isSigner: false, isWritable: false },
+        { pubkey: new PublicKey('SysvarRent111111111111111111111111111111111'), isSigner: false, isWritable: false },
       ],
       data: Buffer.from([1]), // CreateIdempotent
     });
@@ -1121,7 +1123,7 @@ async function swapTokenToSol(token) {
 
   try {
     // 1. Get quote
-    const quoteUrl = `${JUPITER_SWAP_API}/quote?inputMint=${mint}&outputMint=${WSOL_MINT}&amount=${rawAmount}&slippageBps=100`;
+    const quoteUrl = `${JUPITER_SWAP_API}/quote?inputMint=${mint}&outputMint=${WSOL_MINT}&amount=${rawAmount}&slippageBps=500`;
     const quoteRes = await fetch(quoteUrl, { headers: jupHeaders });
     const quote = await quoteRes.json();
     if (quote.error || !quote.outAmount) {
@@ -1238,6 +1240,7 @@ async function sweepFeesToSol() {
             { pubkey: new PublicKey(mint), isSigner: false, isWritable: false },
             { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false },
             { pubkey: tokenProg, isSigner: false, isWritable: false },
+            { pubkey: new PublicKey('SysvarRent111111111111111111111111111111111'), isSigner: false, isWritable: false },
           ],
           data: Buffer.from([1]), // CreateIdempotent
         });
