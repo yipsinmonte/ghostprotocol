@@ -184,7 +184,7 @@ function parseGhost(pubkeyStr, data) {
     const wholeVaultAction = data[o]; o += 1;
 
     // Sanity guards
-    const MIN_IV = 3600, MAX_IV = 365 * 24 * 3600;
+    const MIN_IV = 0, MAX_IV = 365 * 24 * 3600;
     const MIN_HB = 1_600_000_000, MAX_HB = 2_000_000_000;
     if (intervalSeconds < MIN_IV || intervalSeconds > MAX_IV) {
       if (!_skipLoggedSet.has(pubkeyStr)) {
