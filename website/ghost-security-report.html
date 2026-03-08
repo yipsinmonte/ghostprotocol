@@ -164,18 +164,27 @@ body { background: #07070f; color: #d0cce8; font-family: -apple-system, BlinkMac
   .topbar-badge { padding: 3px 8px; font-size: 9px; }
   .page { padding: 68px 16px 60px; }
 
-  /* Audit table — stack on mobile */
-  .audit-table th:nth-child(2) { display: none; }
-  .audit-table td:nth-child(2) { display: none; }
-  .audit-table td { padding: 12px 10px; font-size: 13px; }
-  .vuln-name { font-size: 13px; }
-  .vuln-detail { font-size: 12px; }
+  /* Audit table — stack rows vertically */
+  .audit-table thead { display: none; }
+  .audit-table tr {
+    display: block; padding: 16px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .audit-table td {
+    display: block; padding: 2px 0; border: none;
+    font-size: 14px; text-align: left !important;
+  }
+  .audit-table td:first-child { margin-bottom: 8px; }
+  .audit-table td:nth-child(2) { color: #9a9aba; font-size: 13px; line-height: 1.7; margin-bottom: 10px; }
+  .audit-table td:last-child { margin-top: 4px; }
+  .vuln-name { font-size: 14px; }
+  .vuln-detail { font-size: 12px; margin-top: 2px; }
 
   /* Principles */
   .principle { padding: 14px 0; }
   .principle-icon { width: 32px; height: 32px; font-size: 16px; }
   .principle-title { font-size: 14px; }
-  .principle-desc { font-size: 13px; }
+  .principle-desc { font-size: 13px; line-height: 1.7; }
 
   /* Program ID row */
   .program-row { flex-direction: column; gap: 8px; padding: 10px 12px; font-size: 11px; }
@@ -185,7 +194,7 @@ body { background: #07070f; color: #d0cce8; font-family: -apple-system, BlinkMac
   .section-title { font-size: 18px; margin-bottom: 16px; }
   .section-tag { font-size: 10px; }
 
-  /* Code blocks in technical section */
+  /* Code blocks */
   pre { font-size: 11px !important; padding: 12px !important; }
 
   /* Stamp */
