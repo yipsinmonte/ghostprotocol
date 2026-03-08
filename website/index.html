@@ -6024,6 +6024,28 @@ async function renderExecutionDetail() {
   delete mintMap[GHOST_MINT];
   delete mintMap[DBD_MINT];
 
+  // ── Build vault balance lookup for status verification ──
+  // If a token is still in the vault, the transfer hasn't succeeded (regardless of activity log)
+  const _vaultBalanceMap = {};
+  try {
+    const _ownerPk = new solanaWeb3.PublicKey(ghostState.publicKey);
+    const _conn = new solanaWeb3.Connection(RPC_URL, 'confirmed');
+    const [_vaultPda] = await solanaWeb3.PublicKey.findProgramAddress(
+      [new TextEncoder().encode('vault'), _ownerPk.toBytes()],
+      new solanaWeb3.PublicKey(PROGRAM_ID)
+    );
+    // Fetch all token accounts owned by the vault PDA
+    const _vaultAccts = await _conn.getTokenAccountsByOwner(_vaultPda, { programId: new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') });
+    const _vault22Accts = await _conn.getTokenAccountsByOwner(_vaultPda, { programId: new solanaWeb3.PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb') }).catch(() => ({ value: [] }));
+    for (const a of [..._vaultAccts.value, ..._vault22Accts.value]) {
+      const data = a.account.data;
+      const mintBytes = data.slice(0, 32);
+      const mint = new solanaWeb3.PublicKey(mintBytes).toBase58();
+      const amount = Number(data.readBigUInt64LE(64));
+      _vaultBalanceMap[mint] = amount;
+    }
+  } catch (e) { console.warn('[Ghost] Could not fetch vault balances for status check:', e.message); }
+
   // ── Build distribution lines ──
   const lines = [];
 
@@ -6039,10 +6061,13 @@ async function renderExecutionDetail() {
         return 0;
       });
       for (const [mint, t] of mintEntries) {
-        lines.push({ action, token: t.symbol || mint.slice(0,4)+'…'+mint.slice(-4), amount: t.amount, recipient: shortR, recipientFull: wholeRecipient, logoUrl: t.logoUrl, status: 'complete', mint });
+        // Check if token is still in vault — if so, transfer hasn't completed
+        const vaultBal = _vaultBalanceMap[mint] || 0;
+        const tokenStatus = vaultBal > 0 ? 'pending' : 'complete';
+        lines.push({ action, token: t.symbol || mint.slice(0,4)+'…'+mint.slice(-4), amount: t.amount, recipient: shortR, recipientFull: wholeRecipient, logoUrl: t.logoUrl, status: tokenStatus, mint });
       }
     } else {
-      lines.push({ action, token: 'All tokens', amount: null, recipient: shortR, recipientFull: wholeRecipient, status: 'complete' });
+      lines.push({ action, token: 'All tokens', amount: null, recipient: shortR, recipientFull: wholeRecipient, status: 'pending' });
     }
   }
 
@@ -6083,9 +6108,13 @@ async function renderExecutionDetail() {
     const isLast = gi === entries.length - 1;
     const borderB = isLast ? '' : 'border-bottom:1px solid rgba(255,255,255,0.05);';
 
-    const statusChip = grp.allDone
+    const allDone = grp.tokens.every(t => t.status === 'complete');
+    const allPending = grp.tokens.every(t => t.status === 'pending');
+    const statusChip = allDone
       ? '<span style="font-family:monospace;font-size:9px;padding:2px 8px;letter-spacing:0.14em;background:rgba(51,255,153,0.06);border:1px solid rgba(51,255,153,0.18);color:#33ff99">' + (isBurn ? 'BURNED' : 'SENT') + '</span>'
-      : '<span style="font-family:monospace;font-size:9px;padding:2px 8px;letter-spacing:0.14em;background:rgba(255,170,51,0.06);border:1px solid rgba(255,170,51,0.18);color:#ffaa33">PENDING</span>';
+      : allPending
+        ? '<span style="font-family:monospace;font-size:9px;padding:2px 8px;letter-spacing:0.14em;background:rgba(255,170,51,0.06);border:1px solid rgba(255,170,51,0.18);color:#ffaa33">PENDING</span>'
+        : '<span style="font-family:monospace;font-size:9px;padding:2px 8px;letter-spacing:0.14em;background:rgba(255,170,51,0.06);border:1px solid rgba(255,170,51,0.18);color:#ffaa33">PARTIAL</span>';
 
     // Find a tx sig for this group from activity log
     const _grpTx = (() => {
@@ -6117,10 +6146,10 @@ async function renderExecutionDetail() {
       const logoHtml = tokenLogoEl(_tkSym, 22, tk.logoUrl || null);
       const tokenCol = isBurn ? '#ff8866' : (typeof tokenColor === 'function' ? tokenColor(tk.token) : '#c0bce0');
       const pendingBadge = tk.status === 'pending'
-        ? '<span style="font-size:9px;color:#5a5a7a;margin-left:auto;font-family:monospace">PENDING</span>'
+        ? '<span style="font-size:9px;color:#ffaa33;margin-left:auto;font-family:monospace;background:rgba(255,170,51,0.06);border:1px solid rgba(255,170,51,0.18);padding:1px 6px;letter-spacing:0.1em">PENDING</span>'
         : '';
-      // Find per-token tx sig from activity log
-      const _tkTx = (() => {
+      // Only look up tx sig for completed transfers — pending ones have no valid tx
+      const _tkTx = tk.status === 'complete' ? (() => {
         for (const e of (ghostState.activityLog||[])) {
           if (!e.tx || e.tx.length < 20) continue;
           // Match by _tokens array containing this mint
@@ -6133,7 +6162,7 @@ async function renderExecutionDetail() {
           if (e.msg && tk.token && e.msg.includes(tk.token) && (isBurn ? e.msg.toLowerCase().includes('burn') : true)) return e.tx;
         }
         return _grpTx; // fallback to group tx
-      })();
+      })() : null;
       const _tkSolscan = _tkTx
         ? '<a href="https://solscan.io/tx/' + _tkTx + '" target="_blank" rel="noopener" style="font-family:monospace;font-size:8px;color:#7766aa;text-decoration:none;border:1px solid rgba(102,51,255,0.2);padding:1px 4px;margin-left:auto;flex-shrink:0" onmouseover="this.style.color=\'#aa88ff\'" onmouseout="this.style.color=\'#7766aa\'">↗</a>'
         : '';
