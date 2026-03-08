@@ -1068,9 +1068,9 @@ async function sweepFeesToSol() {
   // The bot creates manual keypair token accounts for the fee wallet.
   // Jupiter only finds tokens at the standard ATA address.
   // Transfer from manual accounts → ATA so Jupiter can swap them.
-  const tokens = await getFeeWalletTokens();
+  const allTokens = await getFeeWalletTokens();
   const byMint = {};
-  for (const t of tokens) {
+  for (const t of allTokens) {
     if (!byMint[t.mint]) byMint[t.mint] = [];
     byMint[t.mint].push(t);
   }
