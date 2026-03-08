@@ -84,7 +84,7 @@ if (feeKp) {
 }
 const WSOL_MINT = 'So11111111111111111111111111111111111111112';
 const JUPITER_SWAP_API = 'https://api.jup.ag/swap/v1';
-const SWEEP_MIN_USD = 0.10;
+const SWEEP_MIN_USD = 1.00;
 const JUPITER_API_KEY = process.env.JUPITER_API_KEY || '';
 const jupHeaders = JUPITER_API_KEY
   ? { 'Content-Type': 'application/json', 'x-api-key': JUPITER_API_KEY }
@@ -458,22 +458,61 @@ async function buildExecuteWholeVaultBurn(ghost, mintPk, tokenProg, vaultAtaPk) 
 // Returns: { pubkey } of the token account, or null on failure.
 // If ATA already exists, returns { pubkey: ata }.
 // If keypair account is created, returns { pubkey: kp.publicKey, kp } (kp must sign tx).
-// ─── Ensure protocol fee wallet has a token account for this mint ────────────
-// Reuses ensureRecipientTokenAccount with PROTOCOL_FEE_WALLET as the owner.
-// Caches results per mint to avoid redundant RPC calls within a scan cycle.
+// ─── Ensure protocol fee wallet has an ATA for this mint ─────────────────────
+// Creates a proper Associated Token Account (not a manual keypair) so that
+// Jupiter, Phantom, and all standard tools can find the tokens.
+// Bot pays the creation cost. Cached per scan cycle.
 const _feeAccountCache = {};
 async function ensureFeeTokenAccount(mintPk, tokenProg) {
   const mintStr = mintPk.toBase58();
   if (_feeAccountCache[mintStr]) return _feeAccountCache[mintStr];
-  const result = await ensureRecipientTokenAccount(PROTOCOL_FEE_WALLET, mintPk, tokenProg);
-  if (result) {
-    _feeAccountCache[mintStr] = result.pubkey;
-    return result.pubkey;
-  }
-  // Fallback: try derived ATA directly
+
   const ata = deriveATA(PROTOCOL_FEE_WALLET, mintPk, tokenProg);
-  _feeAccountCache[mintStr] = ata;
-  return ata;
+
+  // Check if ATA already exists
+  try {
+    const info = await connection.getAccountInfo(ata);
+    if (info) {
+      _feeAccountCache[mintStr] = ata;
+      return ata;
+    }
+  } catch (_) {}
+
+  // Create ATA using Associated Token Program — bot pays, idempotent
+  try {
+    console.log(`    [fee-ata] Creating ATA for fee wallet · mint ${mintStr.slice(0,8)}...`);
+    const createAtaIx = new TransactionInstruction({
+      programId: assocTokenPk,
+      keys: [
+        { pubkey: botKp.publicKey,     isSigner: true,  isWritable: true  },
+        { pubkey: ata,                 isSigner: false, isWritable: true  },
+        { pubkey: PROTOCOL_FEE_WALLET, isSigner: false, isWritable: false },
+        { pubkey: mintPk,              isSigner: false, isWritable: false },
+        { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false },
+        { pubkey: tokenProg,           isSigner: false, isWritable: false },
+      ],
+      data: Buffer.alloc(0),
+    });
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    const tx = new Transaction({ recentBlockhash: blockhash, feePayer: botKp.publicKey });
+    tx.add(createAtaIx);
+    tx.sign(botKp);
+    const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true, maxRetries: 3 });
+    await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+    console.log(`    [fee-ata] ✅ ATA created: ${ata.toBase58().slice(0,8)}... (${sig.slice(0,8)}...)`);
+    await sleep(2000);
+    _feeAccountCache[mintStr] = ata;
+    return ata;
+  } catch (err) {
+    // ATA might already exist (race condition) — check again
+    try {
+      const info = await connection.getAccountInfo(ata);
+      if (info) { _feeAccountCache[mintStr] = ata; return ata; }
+    } catch(_) {}
+    console.warn(`    [fee-ata] Failed to create ATA for ${mintStr.slice(0,8)}...: ${err.message}`);
+    _feeAccountCache[mintStr] = ata; // return derived ATA anyway — program will create if needed
+    return ata;
+  }
 }
 
 async function ensureRecipientTokenAccount(ownerPk, mintPk, tokenProg) {
@@ -1025,8 +1064,103 @@ async function sweepFeesToSol() {
     }
   }
 
-  // ── Step 2: Swap remaining SPL tokens → SOL via Jupiter ─────────────
-  const nonSol = tokens.filter(t => t.mint !== WSOL_MINT);
+  // ── Step 2: Consolidate tokens from manual accounts → ATA ────────────
+  // The bot creates manual keypair token accounts for the fee wallet.
+  // Jupiter only finds tokens at the standard ATA address.
+  // Transfer from manual accounts → ATA so Jupiter can swap them.
+  const tokens = await getFeeWalletTokens();
+  const byMint = {};
+  for (const t of tokens) {
+    if (!byMint[t.mint]) byMint[t.mint] = [];
+    byMint[t.mint].push(t);
+  }
+
+  for (const [mint, accounts] of Object.entries(byMint)) {
+    if (mint === WSOL_MINT) continue;
+    if (accounts.length <= 1) continue; // only one account, no consolidation needed
+
+    const tokenProg = accounts[0].tokenProg;
+    const ata = deriveATA(PROTOCOL_FEE_WALLET, new PublicKey(mint), tokenProg);
+    const ataStr = ata.toBase58();
+
+    // Find which account is the ATA and which are manual
+    const manualAccounts = accounts.filter(a => a.pubkey.toBase58() !== ataStr);
+    if (manualAccounts.length === 0) continue;
+
+    // Ensure ATA exists
+    let ataExists = accounts.some(a => a.pubkey.toBase58() === ataStr);
+    if (!ataExists && feeKp) {
+      try {
+        const createAtaIx = new TransactionInstruction({
+          programId: new PublicKey(ASSOC_TOKEN_ADDR),
+          keys: [
+            { pubkey: botKp.publicKey, isSigner: true, isWritable: true },
+            { pubkey: ata, isSigner: false, isWritable: true },
+            { pubkey: PROTOCOL_FEE_WALLET, isSigner: false, isWritable: false },
+            { pubkey: new PublicKey(mint), isSigner: false, isWritable: false },
+            { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false },
+            { pubkey: tokenProg, isSigner: false, isWritable: false },
+          ],
+          data: Buffer.alloc(0),
+        });
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+        const tx = new Transaction({ recentBlockhash: blockhash, feePayer: botKp.publicKey });
+        tx.add(createAtaIx);
+        tx.sign(botKp);
+        const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true });
+        await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+        console.log(`    [consolidate] Created ATA for ${mint.slice(0,8)}...`);
+        ataExists = true;
+        await sleep(2000);
+      } catch (e) {
+        // ATA might already exist
+        try {
+          const info = await connection.getAccountInfo(ata);
+          if (info) ataExists = true;
+        } catch(_) {}
+      }
+    }
+
+    if (!ataExists || !feeKp) continue;
+
+    // Transfer from each manual account → ATA
+    for (const manual of manualAccounts) {
+      try {
+        const decimals = manual.decimals;
+        // transfer_checked: opcode 12, amount (u64 LE), decimals (u8)
+        const xferData = Buffer.alloc(10);
+        xferData[0] = 12; // TransferChecked
+        xferData.writeBigUInt64LE(BigInt(manual.rawAmount), 1);
+        xferData[9] = decimals;
+        const xferIx = new TransactionInstruction({
+          programId: tokenProg,
+          keys: [
+            { pubkey: manual.pubkey, isSigner: false, isWritable: true },
+            { pubkey: new PublicKey(mint), isSigner: false, isWritable: false },
+            { pubkey: ata, isSigner: false, isWritable: true },
+            { pubkey: PROTOCOL_FEE_WALLET, isSigner: true, isWritable: false },
+          ],
+          data: xferData,
+        });
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+        const tx = new Transaction({ recentBlockhash: blockhash, feePayer: botKp.publicKey });
+        tx.add(xferIx);
+        tx.sign(botKp, feeKp);
+        const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true });
+        await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+        console.log(`    [consolidate] ✅ Moved ${manual.uiAmount} ${mint.slice(0,6)}... → ATA (${sig.slice(0,8)}...)`);
+        await sleep(2000);
+      } catch (e) {
+        console.warn(`    [consolidate] Failed for ${mint.slice(0,8)}...: ${e.message}`);
+      }
+    }
+  }
+
+  // Re-fetch tokens after consolidation
+  const freshTokens = await getFeeWalletTokens();
+
+  // ── Step 3: Swap consolidated SPL tokens → SOL via Jupiter ──────────
+  const nonSol = freshTokens.filter(t => t.mint !== WSOL_MINT);
 
   if (nonSol.length === 0 && !wsolToken) {
     console.log('  [sweep] No tokens to convert');
@@ -1046,8 +1180,12 @@ async function sweepFeesToSol() {
     for (const t of nonSol) {
       const price = prices[t.mint]?.price ? parseFloat(prices[t.mint].price) : 0;
       const usdValue = t.uiAmount * price;
-      if (usdValue < SWEEP_MIN_USD && price > 0) {
-        console.log(`    [sweep] ${t.mint.slice(0,8)}... worth $${usdValue.toFixed(4)} — below $${SWEEP_MIN_USD} threshold, skipping`);
+      if (usdValue < SWEEP_MIN_USD) {
+        if (price > 0) {
+          console.log(`    [sweep] ${t.mint.slice(0,8)}... worth $${usdValue.toFixed(4)} — below $${SWEEP_MIN_USD} threshold, skipping`);
+        } else {
+          console.log(`    [sweep] ${t.mint.slice(0,8)}... no price data — skipping`);
+        }
         continue;
       }
       const result = await swapTokenToSol(t);
