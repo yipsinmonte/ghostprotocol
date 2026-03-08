@@ -509,7 +509,17 @@ async function ensureFeeTokenAccount(mintPk, tokenProg) {
     const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true, maxRetries: 3 });
     await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
     console.log(`    [fee-ata] ✅ ATA created: ${ata.toBase58().slice(0,8)}... (${sig.slice(0,8)}...)`);
-    await sleep(2000);
+
+    // Wait for RPC consistency — poll until the account is visible to simulation
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await sleep(1500);
+      try {
+        const info = await connection.getAccountInfo(ata, 'confirmed');
+        if (info) { break; }
+      } catch (_) {}
+      if (attempt === 9) console.warn(`    [fee-ata] ⚠️  ATA ${ata.toBase58().slice(0,8)}... not yet visible after 15s — proceeding anyway`);
+    }
+
     _feeAccountCache[mintStr] = ata;
     return ata;
   } catch (err) {
@@ -867,8 +877,8 @@ async function runBeneficiaries(ghost, label, now) {
 
 async function scan() {
   console.log(`\n🔍 Scanning... [${new Date().toISOString()}]`);
-  // Clear per-scan caches
-  Object.keys(_feeAccountCache).forEach(k => delete _feeAccountCache[k]);
+  // Clear per-scan caches (vault token cache only — fee ATAs are permanent)
+  Object.keys(_vaultTokenCache).forEach(k => delete _vaultTokenCache[k]);
   Object.keys(_vaultTokenCache).forEach(k => delete _vaultTokenCache[k]);
 
   try {
