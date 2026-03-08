@@ -53,6 +53,9 @@ const DISC = {
 // GhostAccount discriminator — sha256("account:GhostAccount")[0:8]
 const GHOST_ACCOUNT_DISC = Buffer.from([159, 102, 98, 152, 27, 151, 132, 88]);
 
+// Suppress repeated warnings for invalid/implausible ghosts — log once per boot
+const _skipLoggedSet = new Set();
+
 const TOKEN_PROG_ADDR   = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TOKEN22_PROG_ADDR = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 const ASSOC_TOKEN_ADDR  = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1bso';
@@ -184,11 +187,17 @@ function parseGhost(pubkeyStr, data) {
     const MIN_IV = 3600, MAX_IV = 365 * 24 * 3600;
     const MIN_HB = 1_600_000_000, MAX_HB = 2_000_000_000;
     if (intervalSeconds < MIN_IV || intervalSeconds > MAX_IV) {
-      console.warn(`  ⚠️  ${pubkeyStr.slice(0,8)}... implausible interval (${intervalSeconds}s) — skipping`);
+      if (!_skipLoggedSet.has(pubkeyStr)) {
+        console.warn(`  ⚠️  ${pubkeyStr.slice(0,8)}... implausible interval (${intervalSeconds}s) — permanently skipping`);
+        _skipLoggedSet.add(pubkeyStr);
+      }
       return null;
     }
     if (lastHeartbeat < MIN_HB || lastHeartbeat > MAX_HB) {
-      console.warn(`  ⚠️  ${pubkeyStr.slice(0,8)}... implausible heartbeat (${lastHeartbeat}) — skipping`);
+      if (!_skipLoggedSet.has(pubkeyStr)) {
+        console.warn(`  ⚠️  ${pubkeyStr.slice(0,8)}... implausible heartbeat (${lastHeartbeat}) — permanently skipping`);
+        _skipLoggedSet.add(pubkeyStr);
+      }
       return null;
     }
 
@@ -623,7 +632,10 @@ async function processGhost(ghost) {
   // Already fully executed and all beneficiaries paid
   const allBenePaid = ghost.beneficiaries.every(b => b.executed);
   if (ghost.executed && allBenePaid && !ghost.wholeVaultRecipient) {
-    console.log(`  ✅ ${label} fully executed — nothing to do`);
+    if (!_skipLoggedSet.has(ghost.pubkey + ':done')) {
+      console.log(`  ✅ ${label} fully executed — nothing to do`);
+      _skipLoggedSet.add(ghost.pubkey + ':done');
+    }
     return;
   }
 
@@ -805,7 +817,9 @@ async function runBeneficiaries(ghost, label, now) {
     const vaultAccounts = await getVaultTokenAccounts(vaultPk);
 
     if (vaultAccounts.length === 0) {
-      console.log(`    [whole_vault] vault has no token accounts with balance — nothing to do`);
+      console.log(`    [whole_vault] vault has no token accounts with balance — done`);
+      // Mark as complete so we don't log this every scan
+      _skipLoggedSet.add(ghost.pubkey + ':done');
     } else {
       console.log(`    [whole_vault] found ${vaultAccounts.length} token account(s) with balance`);
       let transferred = 0, skipped = 0;
