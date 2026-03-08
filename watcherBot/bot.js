@@ -83,8 +83,12 @@ if (feeKp) {
   console.log('   Fee wallet auto-swap: DISABLED (set FEE_WALLET_KEYPAIR to enable)');
 }
 const WSOL_MINT = 'So11111111111111111111111111111111111111112';
-const JUPITER_SWAP_API = 'https://quote-api.jup.ag/v6';
-const SWEEP_MIN_USD = 0.10; // only swap tokens worth more than $0.10
+const JUPITER_SWAP_API = 'https://api.jup.ag/swap/v1';
+const SWEEP_MIN_USD = 0.10;
+const JUPITER_API_KEY = process.env.JUPITER_API_KEY || '';
+const jupHeaders = JUPITER_API_KEY
+  ? { 'Content-Type': 'application/json', 'x-api-key': JUPITER_API_KEY }
+  : { 'Content-Type': 'application/json' }; // only swap tokens worth more than $0.10
 
 console.log('👻 GHOST Executor Bot v1.9 starting...');
 console.log('   Program:', PROGRAM_ID);
@@ -941,7 +945,7 @@ async function swapTokenToSol(token) {
   try {
     // 1. Get quote
     const quoteUrl = `${JUPITER_SWAP_API}/quote?inputMint=${mint}&outputMint=${WSOL_MINT}&amount=${rawAmount}&slippageBps=100`;
-    const quoteRes = await fetch(quoteUrl);
+    const quoteRes = await fetch(quoteUrl, { headers: jupHeaders });
     const quote = await quoteRes.json();
     if (quote.error || !quote.outAmount) {
       console.log(`    [sweep] No route for ${mint.slice(0,8)}... — skipping`);
@@ -951,7 +955,7 @@ async function swapTokenToSol(token) {
     // 2. Get swap transaction
     const swapRes = await fetch(`${JUPITER_SWAP_API}/swap`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: jupHeaders,
       body: JSON.stringify({
         quoteResponse: quote,
         userPublicKey: PROTOCOL_FEE_WALLET.toBase58(),
@@ -1034,7 +1038,7 @@ async function sweepFeesToSol() {
     let prices = {};
     try {
       const ids = nonSol.map(t => t.mint).join(',');
-      const res = await fetch(JUPITER_PRICE_API + ids);
+      const res = await fetch(JUPITER_PRICE_API + ids, { headers: jupHeaders });
       const json = await res.json();
       prices = json.data || {};
     } catch (_) {}
@@ -1080,7 +1084,7 @@ async function updateFeeSnapshot() {
     if (pending.length > 0) {
       try {
         const ids = pending.map(t => t.mint).join(',');
-        const res = await fetch(JUPITER_PRICE_API + ids);
+        const res = await fetch(JUPITER_PRICE_API + ids, { headers: jupHeaders });
         const json = await res.json();
         for (const t of pending) {
           const p = json.data?.[t.mint]?.price;
@@ -1093,7 +1097,7 @@ async function updateFeeSnapshot() {
     // SOL price
     let solPrice = 0;
     try {
-      const res = await fetch(JUPITER_PRICE_API + WSOL_MINT);
+      const res = await fetch(JUPITER_PRICE_API + WSOL_MINT, { headers: jupHeaders });
       const json = await res.json();
       solPrice = parseFloat(json.data?.[WSOL_MINT]?.price || '0');
     } catch (_) {}
