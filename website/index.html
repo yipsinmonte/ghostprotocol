@@ -7723,7 +7723,7 @@ async function guardianCancelAwakening(ownerAddress) {
 
 async function guardianWithdrawAll(ownerAddress) {
   if (!ghostState.provider) { showNotif('Connect your wallet first', 'error'); return; }
-  const _ok3 = await ghostConfirm({ icon:'🔓', title:'Guardian Withdrawal', message:'Withdraw all vault assets from ' + ownerAddress.slice(0,4) + '...' + ownerAddress.slice(-4) + ' to your recovery wallet? Each asset type requires one signature.', okLabel:'WITHDRAW ALL' }); if (!_ok3) return;
+  const _ok3 = await ghostConfirm({ icon:'🔓', title:'Guardian Withdrawal', message:'Withdraw all vault assets from ' + ownerAddress.slice(0,4) + '...' + ownerAddress.slice(-4) + ' to your recovery wallet?<br><br><span style="color:#f5a623;font-size:0.85em">⚠️ Ensure you have enough SOL on this wallet — each new token type may require ~0.002 SOL for account creation + tx fees.</span>', okLabel:'WITHDRAW ALL' }); if (!_ok3) return;
 
   try {
     showNotif('Preparing guardian withdrawal...', '');
@@ -7843,69 +7843,83 @@ async function guardianWithdrawAll(ownerAddress) {
         splItems.push({ info, rawAmount, mintPk, decimals, tokenProgPk, vaultTokenAcct, recipientAta, needsAta: !ataInfo, feeBps });
       }
 
-      // Individual transaction per token — isolates failures and avoids batch complexity
-      for (let idx = 0; idx < splItems.length; idx++) {
-        const item = splItems[idx];
-        try {
-          const { blockhash } = await connection.getLatestBlockhash();
-          const tx = new Transaction({ recentBlockhash: blockhash, feePayer: recoveryWalletPk });
-          let extraKp = null; // keypair for manual token account creation
+      // Pre-check: estimate SOL needed for ATA creation + tx fees
+      const ataCreateCount = splItems.filter(i => i.needsAta).length;
+      const estSolNeeded = (ataCreateCount * 0.002) + (Math.ceil(splItems.length / 2) * 0.005) + (wsolAccts.length > 0 ? 0.005 : 0);
+      let recoveryBalance = 0;
+      try {
+        const bRes = await fetch(RPC_URL, {method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({jsonrpc:'2.0',id:'gbal',method:'getBalance',params:[recoveryWalletPk.toBase58()]})});
+        recoveryBalance = ((await bRes.json()).result?.value || 0) / 1e9;
+      } catch(_) {}
+      if (recoveryBalance < estSolNeeded) {
+        showNotif('⚠️ Low SOL on recovery wallet (' + recoveryBalance.toFixed(4) + ' SOL). Need ~' + estSolNeeded.toFixed(3) + ' SOL for ATA creation + fees. Some withdrawals may fail.', 'error');
+      }
 
-          // If recipient doesn't have a token account for this mint, create one via ATA
-          // CreateIdempotent is bundled into the same tx for atomicity
-          let receiveAcct = item.recipientAta;
-          if (item.needsAta) {
-            // Try ATA — CreateIdempotent in same tx (correct program address now)
-            const ataIx = buildCreateATAIx(recoveryWalletPk, item.recipientAta, recoveryWalletPk, item.mintPk, item.tokenProgPk);
-            tx.add(ataIx);
-            receiveAcct = item.recipientAta;
-            console.log('[Ghost] Guardian: ATA CreateIdempotent for', item.mintPk.toBase58().slice(0,8), '→', receiveAcct.toBase58().slice(0,8));
-          }
+      // Batch SPL withdrawals — 2 tokens per tx, grouped by token program
+      const guardianSplGroups = {};
+      for (const item of splItems) {
+        const prog = item.tokenProgPk.toBase58();
+        if (!guardianSplGroups[prog]) guardianSplGroups[prog] = [];
+        guardianSplGroups[prog].push(item);
+      }
 
-          let adjAmount = item.rawAmount;
-          // Transfer fee is deducted from recipient, not added to source — no adjustment needed
-          // if (item.feeBps > 0) adjAmount = adjustForTransferFee(adjAmount, item.feeBps);
-
-          const amtBuf = new ArrayBuffer(8);
-          new DataView(amtBuf).setBigUint64(0, adjAmount, true);
-          const txData = new Uint8Array(16);
-          txData.set(disc, 0);
-          txData.set(new Uint8Array(amtBuf), 8);
-
-          console.log('[Ghost] Guardian ix:', item.mintPk.toBase58().slice(0,8), 'vault:', item.vaultTokenAcct.toBase58().slice(0,8), 'recv:', receiveAcct.toBase58().slice(0,8), 'prog:', item.tokenProgPk.toBase58().slice(0,8), 'amt:', adjAmount.toString());
-          tx.add(new TransactionInstruction({ programId, keys: [
-            { pubkey: ghostPda,             isSigner: false, isWritable: true  },
-            { pubkey: ownerPk,              isSigner: false, isWritable: false },
-            { pubkey: vaultPda,             isSigner: false, isWritable: false },
-            { pubkey: recoveryWalletPk,     isSigner: true,  isWritable: true  },
-            { pubkey: item.mintPk,          isSigner: false, isWritable: false },
-            { pubkey: item.vaultTokenAcct,  isSigner: false, isWritable: true  },
-            { pubkey: receiveAcct,          isSigner: false, isWritable: true  },
-            { pubkey: item.tokenProgPk,     isSigner: false, isWritable: false },
-          ], data: txData }));
-
-          const symLabel = item.info.symbol || item.info.mint?.slice(0,6);
-          showNotif('Sign to withdraw ' + symLabel + '...', '');
-          const signed = await ghostState.provider.signTransaction(tx);
-          let sig;
+      const G_BATCH_SIZE = 2;
+      for (const [, groupItems] of Object.entries(guardianSplGroups)) {
+        for (let bi = 0; bi < groupItems.length; bi += G_BATCH_SIZE) {
+          const batch = groupItems.slice(bi, bi + G_BATCH_SIZE);
           try {
-            sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' });
-          } catch(simErr) {
-            let logs = []; try { logs = await simErr.getLogs?.(connection); } catch(_) {}
-            console.error('[Ghost] Guardian tx error for', symLabel, ':', simErr.message, 'logs:', logs);
-            showNotif('⚠️ Failed: ' + symLabel + ' — ' + (simErr.message||'').slice(0,80), 'error');
-            continue;
-          }
-          const conf = await connection.confirmTransaction(sig, 'confirmed');
-          if (conf.value?.err) { console.error('[Ghost] Guardian tx err:', conf.value.err); continue; }
+            const { blockhash } = await connection.getLatestBlockhash();
+            const tx = new Transaction({ recentBlockhash: blockhash, feePayer: recoveryWalletPk });
 
-          const humanAmt = (Number(item.rawAmount) / Math.pow(10, item.decimals)).toLocaleString();
-          guardianWithdrawLog.push(humanAmt + ' ' + symLabel);
-          guardianWithdrawSigs.push(sig);
-          successCount++;
-        } catch(tokenErr) {
-          console.error('[Ghost] Guardian withdraw failed for', item.info.mint?.slice(0,8), ':', tokenErr.message || tokenErr);
-          showNotif('⚠️ Failed: ' + (item.info.symbol || item.info.mint?.slice(0,6)) + ' — ' + (tokenErr.message||tokenErr).toString().slice(0,80), 'error');
+            for (const item of batch) {
+              if (item.needsAta) {
+                tx.add(buildCreateATAIx(recoveryWalletPk, item.recipientAta, recoveryWalletPk, item.mintPk, item.tokenProgPk));
+                console.log('[Ghost] Guardian: ATA CreateIdempotent for', item.mintPk.toBase58().slice(0,8));
+              }
+              const amtBuf = new ArrayBuffer(8);
+              new DataView(amtBuf).setBigUint64(0, item.rawAmount, true);
+              const txData = new Uint8Array(16);
+              txData.set(disc, 0);
+              txData.set(new Uint8Array(amtBuf), 8);
+              tx.add(new TransactionInstruction({ programId, keys: [
+                { pubkey: ghostPda,             isSigner: false, isWritable: true  },
+                { pubkey: ownerPk,              isSigner: false, isWritable: false },
+                { pubkey: vaultPda,             isSigner: false, isWritable: false },
+                { pubkey: recoveryWalletPk,     isSigner: true,  isWritable: true  },
+                { pubkey: item.mintPk,          isSigner: false, isWritable: false },
+                { pubkey: item.vaultTokenAcct,  isSigner: false, isWritable: true  },
+                { pubkey: item.recipientAta,    isSigner: false, isWritable: true  },
+                { pubkey: item.tokenProgPk,     isSigner: false, isWritable: false },
+              ], data: txData }));
+            }
+
+            const batchSyms = batch.map(i => i.info.symbol || i.info.mint?.slice(0,6)).join(', ');
+            showNotif('Sign to withdraw ' + batchSyms + '...', '');
+            const signed = await ghostState.provider.signTransaction(tx);
+            let sig;
+            try {
+              sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' });
+            } catch(simErr) {
+              let logs = []; try { logs = await simErr.getLogs?.(connection); } catch(_) {}
+              console.error('[Ghost] Guardian batch error [' + batchSyms + ']:', simErr.message, 'logs:', logs);
+              showNotif('⚠️ Failed: ' + batchSyms + ' — ' + (simErr.message||'').slice(0,80), 'error');
+              continue;
+            }
+            const conf = await connection.confirmTransaction(sig, 'confirmed');
+            if (conf.value?.err) { console.error('[Ghost] Guardian batch err:', conf.value.err); continue; }
+
+            for (const item of batch) {
+              const humanAmt = (Number(item.rawAmount) / Math.pow(10, item.decimals)).toLocaleString();
+              guardianWithdrawLog.push(humanAmt + ' ' + (item.info.symbol || item.info.mint?.slice(0,6)));
+              guardianWithdrawSigs.push(sig);
+              successCount++;
+            }
+          } catch(batchErr) {
+            const syms = batch.map(i => i.info.symbol || i.info.mint?.slice(0,6)).join(', ');
+            console.error('[Ghost] Guardian batch failed [' + syms + ']:', batchErr.message || batchErr);
+            showNotif('⚠️ Failed: ' + syms + ' — ' + (batchErr.message||batchErr).toString().slice(0,80), 'error');
+          }
         }
       }
     }
@@ -8032,7 +8046,7 @@ async function guardianWithdrawAll(ownerAddress) {
       _refreshBenePickers(); renderBeneficiaries(); renderVaultHoldings();
       await scanGuardianAssignments();
     } else {
-      showNotif('No assets were successfully withdrawn', 'error');
+      showNotif('Vault is empty — nothing to withdraw', 'error');
     }
   } catch(err) {
     console.error('Guardian withdraw error:', err);
