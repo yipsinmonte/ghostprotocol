@@ -8304,11 +8304,11 @@ function createATAInstruction(payer, ata, owner, mint, tokenProgram) {
 }
 
 // Wrap native SOL into a wSOL token account
-// If wSOL ATA already exists → reuse it (transfer + syncNative only)
-// If not → create via manual keypair (ATA program unreliable on some nodes)
-// Returns { instructions, wsolAta, kp } — kp is non-null only when new account created
+// Uses CreateIdempotent for ATA creation (no keypair needed — can inline into any tx)
+// If wSOL ATA already exists → just transfer + syncNative
+// Returns { instructions, wsolAta, kp: null } — kp always null (no keypair needed)
 async function buildWrapSOLInstructions(walletPubkey, lamports, connection) {
-  const { Keypair, SystemProgram, TransactionInstruction, PublicKey } = solanaWeb3;
+  const { SystemProgram, TransactionInstruction, PublicKey } = solanaWeb3;
   const mintPk = new PublicKey(WSOL_MINT);
   const TOKEN_PROG = TOKEN_PROGRAM_ID_PK();
   const instructions = [];
@@ -8317,45 +8317,23 @@ async function buildWrapSOLInstructions(walletPubkey, lamports, connection) {
   const existing = connection ? await connection.getAccountInfo(wsolAta) : null;
   console.log('[Ghost] wSOL ATA:', wsolAta.toBase58(), 'exists:', !!existing);
 
-  let wsolAcct = wsolAta;
-  let kp = null;
-
   if (!existing) {
-    // createAccount with lamports = rent + wrapAmount
-    // Per SPL docs: InitializeAccount sets token balance = SOL balance at init time
-    // So we bake the wrap amount directly into createAccount — no transfer+syncNative needed
-    kp = Keypair.generate();
-    wsolAcct = kp.publicKey;
-    const space = 165;
-    const rent = connection ? await connection.getMinimumBalanceForRentExemption(space) : 2039280;
-    instructions.push(SystemProgram.createAccount({
-      fromPubkey: walletPubkey, newAccountPubkey: wsolAcct,
-      lamports: rent + Number(lamports), // rent + wrap amount = token balance at init
-      space, programId: TOKEN_PROG
-    }));
-    const initData = new Uint8Array(33);
-    initData[0] = 18; // InitializeAccount3 opcode
-    initData.set(walletPubkey.toBytes(), 1); // owner = wallet
-    instructions.push(new TransactionInstruction({
-      programId: TOKEN_PROG,
-      keys: [{ pubkey: wsolAcct, isSigner: false, isWritable: true },
-             { pubkey: mintPk,   isSigner: false, isWritable: false }],
-      data: initData
-    }));
-    console.log('[Ghost] wSOL keypair account:', wsolAcct.toBase58(), 'lamports:', rent + Number(lamports));
-  } else {
-    // Account already exists — transfer additional SOL and sync
-    instructions.push(SystemProgram.transfer({
-      fromPubkey: walletPubkey, toPubkey: wsolAcct, lamports: Number(lamports)
-    }));
-    instructions.push(new TransactionInstruction({
-      programId: TOKEN_PROG,
-      keys: [{ pubkey: wsolAcct, isSigner: false, isWritable: true }],
-      data: new Uint8Array([17]) // SyncNative
-    }));
+    // CreateIdempotent — no keypair, wallet-only signing
+    instructions.push(buildCreateATAIx(walletPubkey, wsolAta, walletPubkey, mintPk, TOKEN_PROG));
+    console.log('[Ghost] wSOL ATA CreateIdempotent added');
   }
 
-  return { instructions, wsolAta: wsolAcct, kp };
+  // Transfer SOL into wSOL account + SyncNative to update token balance
+  instructions.push(SystemProgram.transfer({
+    fromPubkey: walletPubkey, toPubkey: wsolAta, lamports: Number(lamports)
+  }));
+  instructions.push(new TransactionInstruction({
+    programId: TOKEN_PROG,
+    keys: [{ pubkey: wsolAta, isSigner: false, isWritable: true }],
+    data: new Uint8Array([17]) // SyncNative
+  }));
+
+  return { instructions, wsolAta, kp: null };
 }
 
 // Unwrap wSOL ATA back to native SOL by closing the account
@@ -9664,27 +9642,9 @@ const splMeta = await Promise.all(splTokens.map(async t => {
 // Filter out nulls (zero balance tokens)
 const validSpl = splMeta.filter(Boolean);
 
-// ── Phase 2: Create any missing vault token accounts (one per tx, separate signing) ───────
-for (const item of validSpl.filter(m => m.needsCreate)) {
-  try {
-    showNotif('Creating vault account for ' + item.t.symbol + '...', '');
-    const { createIx, initIx, kp } = await buildManualTokenAccountIxs(walletPk, item.mintPk, vaultPda, item.rawTokenProgPk, connection);
-    const { blockhash } = await connection.getLatestBlockhash();
-    const createTx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
-    createTx.add(createIx, initIx);
-    const walletSigned = await ghostState.provider.signTransaction(createTx);
-    walletSigned.partialSign(kp);
-    const createSig = await connection.sendRawTransaction(walletSigned.serialize(), { skipPreflight: true });
-    const conf = await connection.confirmTransaction(createSig, 'confirmed');
-    if (conf.value?.err) throw new Error('Create failed: ' + JSON.stringify(conf.value.err));
-    item.vaultAta = kp.publicKey; // use the new account
-    item.needsCreate = false;
-  } catch(err) {
-    console.error('[Ghost] Failed to create vault ATA for', item.t.symbol, err);
-    showNotif('⚠️ Could not create vault account for ' + item.t.symbol + ' — skipping', 'error');
-    item.skip = true;
-  }
-}
+// ── Phase 2: Vault account creation handled inline via CreateIdempotent in batch tx ───────
+// No separate signing needed — CreateIdempotent is added to the batch deposit tx itself
+// (needsCreate flag is preserved and checked in Phase 3)
 
 // ── Phase 3: Batch deposit SPL tokens — group by token program, max 3 per tx ─────────────
 // Grouping by program avoids mixing classic SPL + Token-2022 in one deposit tx
@@ -9707,7 +9667,12 @@ for (const [progStr, items] of Object.entries(splGroups)) {
       const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
 
       for (const item of batch) {
-        let { t, mintPk, rawTokenProgPk, ownerAta, vaultAta, onChainBalance, onChainRaw } = item;
+        let { t, mintPk, rawTokenProgPk, ownerAta, vaultAta, needsCreate, onChainBalance, onChainRaw } = item;
+        // Inline vault ATA creation via CreateIdempotent (no keypair, no separate tx)
+        if (needsCreate) {
+          tx.add(buildCreateATAIx(walletPk, vaultAta, vaultPda, mintPk, rawTokenProgPk));
+          console.log('[Ghost] DepositAll: CreateIdempotent vault ATA for', t.symbol);
+        }
         // Defensive re-fetch: get actual raw balance via getParsedAccountInfo right before building tx
         try {
           const freshAcct = await connection.getParsedAccountInfo(ownerAta);
@@ -9831,18 +9796,16 @@ for (const t of solTokens) {
     if (!vaultWsolAta) vaultWsolAta = await findATAWithProg(vaultPda, WSOL_MINT_PK, TOKEN_PROG_PK);
     const vaultWsolInfo = await connection.getAccountInfo(vaultWsolAta);
 
-    const { instructions: wrapIxs, wsolAta, kp: wsolKp } = await buildWrapSOLInstructions(walletPk, lamports, connection);
+    const { instructions: wrapIxs, wsolAta } = await buildWrapSOLInstructions(walletPk, lamports, connection);
     const combinedTx = new Transaction({ feePayer: walletPk });
-    const signers = [];
-    if (wsolKp) signers.push(wsolKp);
     wrapIxs.forEach(ix => combinedTx.add(ix));
 
     let resolvedVaultWsolAta = vaultWsolAta;
     if (!vaultWsolInfo) {
-      const { createIx, initIx, kp: vaultKp } = await buildManualTokenAccountIxs(walletPk, WSOL_MINT_PK, vaultPda, TOKEN_PROG_PK, connection);
-      combinedTx.add(createIx, initIx);
-      signers.push(vaultKp);
-      resolvedVaultWsolAta = vaultKp.publicKey;
+      // CreateIdempotent — no keypair needed
+      combinedTx.add(buildCreateATAIx(walletPk, vaultWsolAta, vaultPda, WSOL_MINT_PK, TOKEN_PROG_PK));
+      resolvedVaultWsolAta = vaultWsolAta;
+      console.log('[Ghost] Vault wSOL ATA CreateIdempotent added');
     }
 
     // If stranded wSOL exists in a different account than wsolAta, close it first in a
@@ -9887,7 +9850,6 @@ for (const t of solTokens) {
     combinedTx.recentBlockhash = depBh;
     showNotif('Sign to deposit SOL to vault...', '');
     const depSigned = await ghostState.provider.signTransaction(combinedTx);
-    for (const kp of signers) depSigned.partialSign(kp);
     const depSig = await connection.sendRawTransaction(depSigned.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' });
     const conf = await connection.confirmTransaction(depSig, 'confirmed');
     if (conf.value?.err) throw new Error('TX failed: ' + JSON.stringify(conf.value.err));
@@ -10648,52 +10610,23 @@ async function dbDeposit() {
     const { blockhash } = await connection.getLatestBlockhash();
     const tx = new Transaction({ recentBlockhash: blockhash, feePayer: walletPk });
 
-    // Phase 1: Create vault token account if needed
+    // Phase 1: Create vault token account if needed — inline into deposit tx via CreateIdempotent
     const vaultAtaInfo = await connection.getAccountInfo(vaultAta);
     console.log('[Ghost] vaultAta:', vaultAta.toBase58(), 'exists:', !!vaultAtaInfo);
     if (!vaultAtaInfo) {
-      // Step 1a: Fund vault PDA so ATA program accepts it as a valid owner
+      // Fund vault PDA if empty (required for ATA program to accept it as owner)
       const vaultPdaInfo = await connection.getAccountInfo(vaultPda);
       console.log('[Ghost] vaultPda lamports:', vaultPdaInfo?.lamports ?? 0);
       if (!vaultPdaInfo || vaultPdaInfo.lamports === 0) {
-        showNotif('Activating vault...', '');
         const minRent = await connection.getMinimumBalanceForRentExemption(0);
-        const { blockhash: fundBh } = await connection.getLatestBlockhash();
-        const fundTx = new Transaction({ recentBlockhash: fundBh, feePayer: walletPk });
-        fundTx.add(solanaWeb3.SystemProgram.transfer({
+        tx.add(solanaWeb3.SystemProgram.transfer({
           fromPubkey: walletPk, toPubkey: vaultPda, lamports: minRent
         }));
-        const fundSigned = await ghostState.provider.signTransaction(fundTx);
-        const fundSig = await connection.sendRawTransaction(fundSigned.serialize(), { skipPreflight: true });
-        console.log('[Ghost] Vault PDA fund tx:', fundSig);
-        const fundConf = await connection.confirmTransaction(fundSig, 'confirmed');
-        if (fundConf.value?.err) throw new Error('Vault activation failed: ' + JSON.stringify(fundConf.value.err));
-        console.log('[Ghost] Vault PDA funded');
+        console.log('[Ghost] Adding vault PDA fund to deposit tx');
       }
-
-      // Step 1b: Create vault token account via raw createAccount + initializeAccount3
-      // Bypasses ATA program which fails with ProgramAccountNotFound on some RPCs
-      showNotif('Initializing vault token account...', '');
-      console.log('[Ghost] Creating vault token account manually');
-      const { blockhash: initBh } = await connection.getLatestBlockhash();
-      const initTx = new Transaction({ recentBlockhash: initBh, feePayer: walletPk });
-      const { createIx, initIx, kp: vaultTokenKp } = await buildManualTokenAccountIxs(
-        walletPk, depositMintPk, vaultPda, rawTokenProgPk, connection
-      );
-      initTx.add(createIx, initIx);
-      // Wallet signs first, then keypair signs — Phantom may strip pre-existing partial sigs
-      const initWalletSigned = await ghostState.provider.signTransaction(initTx);
-      initWalletSigned.partialSign(vaultTokenKp); // add keypair sig AFTER wallet
-      const initSig = await connection.sendRawTransaction(initWalletSigned.serialize(), { skipPreflight: true });
-      console.log('[Ghost] Vault token account tx:', initSig, 'addr:', vaultTokenKp.publicKey.toBase58());
-      const initConf = await connection.confirmTransaction(initSig, 'confirmed');
-      if (initConf.value?.err) throw new Error('Vault init failed: ' + JSON.stringify(initConf.value.err));
-      // Override vaultAta to use the newly created account
-      vaultAta = vaultTokenKp.publicKey;
-      console.log('[Ghost] Vault token account created:', vaultAta.toBase58());
-      showNotif('Vault ready — proceeding with deposit...', '');
-      const { blockhash: newBh } = await connection.getLatestBlockhash();
-      tx.recentBlockhash = newBh;
+      // CreateIdempotent — no keypair needed, wallet-only signing, no Phantom warning
+      tx.add(buildCreateATAIx(walletPk, vaultAta, vaultPda, depositMintPk, rawTokenProgPk));
+      console.log('[Ghost] Adding CreateIdempotent vault ATA to deposit tx');
     }
 
     // Phase 2: For SOL — wrap native SOL to wSOL in separate tx
@@ -10719,21 +10652,11 @@ async function dbDeposit() {
       }
       safeAmount = Math.min(amount, Math.max(0, _liveBalSingle - SOL_FEE_RESERVE_SINGLE));
       const lamports = Math.round(safeAmount * 1e9);
-      const { instructions: wrapIxs, wsolAta, kp: wsolKp } = await buildWrapSOLInstructions(walletPk, lamports, connection);
-      showNotif('Wrapping SOL...', '');
-      const { blockhash: wrapBh } = await connection.getLatestBlockhash();
-      const wrapTx = new Transaction({ recentBlockhash: wrapBh, feePayer: walletPk });
-      wrapIxs.forEach(ix => wrapTx.add(ix));
-      console.log('[Ghost] SOL wrap account:', wsolAta.toBase58(), 'newKp:', !!wsolKp);
-      const wrapWalletSigned = await ghostState.provider.signTransaction(wrapTx);
-      if (wsolKp) wrapWalletSigned.partialSign(wsolKp);
-      const wrapSig = await connection.sendRawTransaction(wrapWalletSigned.serialize(), { skipPreflight: true });
-      const wrapConf = await connection.confirmTransaction(wrapSig, 'confirmed');
-      if (wrapConf.value?.err) throw new Error('SOL wrap failed: ' + JSON.stringify(wrapConf.value.err));
+      const { instructions: wrapIxs, wsolAta } = await buildWrapSOLInstructions(walletPk, lamports, connection);
+      // Inline wrap instructions into the deposit tx — no keypair, no separate signing
+      wrapIxs.forEach(ix => tx.add(ix));
       effectiveOwnerAta = wsolAta;
-      showNotif('SOL wrapped — depositing...', '');
-      const { blockhash: depBh } = await connection.getLatestBlockhash();
-      tx.recentBlockhash = depBh;
+      console.log('[Ghost] SOL wrap inlined into deposit tx, wsolAta:', wsolAta.toBase58());
     }
 
     // Phase 3: Deposit — for SOL use safeAmount (fee-reserved), for SPL use original amount
