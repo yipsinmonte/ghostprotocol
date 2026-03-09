@@ -9964,7 +9964,7 @@ let vaultAta;
 try { const va = await connection.getTokenAccountsByOwner(vaultPda, { mint: withdrawMintPk }); if (va.value.length > 0) vaultAta = va.value[0].pubkey; } catch(e) {}
 if (!vaultAta) vaultAta = await findATAWithProg(vaultPda, withdrawMintPk, new PublicKey(normalizedTokenProg));
 let ownerAta;
-{ const ex = await connection.getTokenAccountsByOwner(walletPk, { mint: withdrawMintPk }).catch(()=>({value:[]})); ownerAta = ex.value[0]?.pubkey || await findATA(walletPk, withdrawMintPk); }
+{ const ex = await connection.getTokenAccountsByOwner(walletPk, { mint: withdrawMintPk }).catch(()=>({value:[]})); ownerAta = ex.value[0]?.pubkey || await findATAWithProg(walletPk, withdrawMintPk, rawTokenProgPk); }
 const ownerAtaInfo = await connection.getAccountInfo(ownerAta);
 return { vt, withdrawMintPk, rawTokenProgPk, vaultAta, ownerAta, ownerAtaMissing: !ownerAtaInfo, feeBps };
 }));
@@ -10133,7 +10133,7 @@ const splMeta2 = await Promise.all(splTokens.map(async vt => {
   try { const va = await connection.getTokenAccountsByOwner(vaultPda, { mint: mintPk }); if (va.value.length > 0) vaultAta = va.value[0].pubkey; } catch(e) {}
   if (!vaultAta) vaultAta = await findATAWithProg(vaultPda, mintPk, rawTokenProgPk);
   let ownerAta;
-  { const ex = await connection.getTokenAccountsByOwner(walletPk, { mint: mintPk }).catch(()=>({value:[]})); ownerAta = ex.value[0]?.pubkey || await findATA(walletPk, mintPk); }
+  { const ex = await connection.getTokenAccountsByOwner(walletPk, { mint: mintPk }).catch(()=>({value:[]})); ownerAta = ex.value[0]?.pubkey || await findATAWithProg(walletPk, mintPk, rawTokenProgPk); }
   const ownerAtaInfo = await connection.getAccountInfo(ownerAta);
   return { vt, mintPk, rawTokenProgPk, vaultAta, ownerAta, ownerAtaMissing: !ownerAtaInfo, feeBps };
 }));
@@ -10614,7 +10614,7 @@ async function dbDeposit() {
     const ownerAta = isSOL
       ? await findATA(walletPk, WSOL_MINT_PK)  // wSOL ATA (created + funded in wrap step)
       : (await connection.getTokenAccountsByOwner(walletPk, { mint: depositMintPk }).catch(()=>({value:[]}))).value[0]?.pubkey
-          || await findATA(walletPk, depositMintPk); // look up real account first, fall back to ATA derivation
+          || await findATAWithProg(walletPk, depositMintPk, rawTokenProgPk); // look up real account first, fall back to ATA derivation
 
     // Vault destination token account
     const ghostMintStr = ghostState.ghost?.mint || GHOST_MINT;
@@ -10698,6 +10698,7 @@ async function dbDeposit() {
 
     // Phase 2: For SOL — wrap native SOL to wSOL in separate tx
     let effectiveOwnerAta = ownerAta;
+    let safeAmount = amount; // default to user amount; overwritten for SOL with fee-reserved value
     if (isSOL) {
       // Re-fetch live SOL balance — Phase 1 vault account creation may have consumed rent
       let _liveBalSingle = t.balance;
@@ -10716,7 +10717,7 @@ async function dbDeposit() {
         if (maxSol <= 0) throw new Error('Not enough SOL after reserving ' + SOL_FEE_RESERVE_SINGLE.toFixed(3) + ' for fees (balance: ' + _liveBalSingle.toFixed(4) + ')');
         showNotif('⚠️ Capped at ' + maxSol.toFixed(4) + ' SOL (reserving ' + SOL_FEE_RESERVE_SINGLE.toFixed(3) + ' for fees)', '');
       }
-      const safeAmount = Math.min(amount, Math.max(0, _liveBalSingle - SOL_FEE_RESERVE_SINGLE));
+      safeAmount = Math.min(amount, Math.max(0, _liveBalSingle - SOL_FEE_RESERVE_SINGLE));
       const lamports = Math.round(safeAmount * 1e9);
       const { instructions: wrapIxs, wsolAta, kp: wsolKp } = await buildWrapSOLInstructions(walletPk, lamports, connection);
       showNotif('Wrapping SOL...', '');
@@ -10737,7 +10738,7 @@ async function dbDeposit() {
 
     // Phase 3: Deposit — for SOL use safeAmount (fee-reserved), for SPL use original amount
     const disc = [18, 62, 110, 8, 26, 106, 248, 151];
-    const _depositAmount = (isSOL && typeof safeAmount !== 'undefined') ? safeAmount : amount;
+    const _depositAmount = isSOL ? safeAmount : amount;
     const amountRaw = BigInt(Math.round(_depositAmount * Math.pow(10, isSOL ? 9 : t.decimals)));
     const buf = new ArrayBuffer(8);
     new DataView(buf).setBigUint64(0, amountRaw, true);
